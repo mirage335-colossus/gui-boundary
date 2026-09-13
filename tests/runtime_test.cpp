@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <iostream>
+#include <latch>
 #include <memory>
 #include <string>
 #include <thread>
@@ -230,6 +231,66 @@ void ui_threads_and_shutdown() {
     require(destroyed, "Captured destructor could not inspect shutdown queue");
 }
 
+void ui_concurrent_delivery_and_shutdown() {
+    // Exercise actual overlap: producers retry bounded-capacity rejection while
+    // the owning thread drains. Each producer's accepted order must survive.
+    gui::UiQueue queue(16);
+    constexpr unsigned workers = 4;
+    constexpr unsigned per_worker = 80;
+    std::latch start(1);
+    std::atomic<unsigned> finished{0};
+    std::vector<std::vector<unsigned>> received(workers);
+    std::vector<std::thread> producers;
+    for (unsigned worker = 0; worker < workers; ++worker) {
+        producers.emplace_back([&, worker] {
+            start.wait();
+            for (unsigned sequence = 0; sequence < per_worker; ++sequence) {
+                while (!queue.post([&, worker, sequence] { received[worker].push_back(sequence); }))
+                    std::this_thread::yield();
+            }
+            finished.fetch_add(1, std::memory_order_release);
+        });
+    }
+    start.count_down();
+    bool task_failed = false;
+    while (finished.load(std::memory_order_acquire) != workers || queue.pending() != 0) {
+        const auto drained = queue.drain(7);
+        task_failed = task_failed || !drained.errors.empty();
+        if (drained.executed == 0) std::this_thread::yield();
+    }
+    for (auto& producer : producers) producer.join();
+    require(!task_failed, "Concurrent delivery task failed");
+    for (const auto& values : received) {
+        require(values.size() == per_worker, "Concurrent drain lost or duplicated work");
+        for (unsigned sequence = 0; sequence < per_worker; ++sequence)
+            require(values[sequence] == sequence, "Concurrent drain reordered a producer's work");
+    }
+
+    // Hold an executing task across shutdown on another thread. The active
+    // invocation completes, queued work is discarded, and no lock is retained
+    // while user code runs or waits for the worker to report completion.
+    gui::UiQueue closing;
+    std::latch active(1), stopped(1);
+    unsigned executed = 0;
+    require(closing.post([&] {
+        active.count_down();
+        stopped.wait();
+        require(closing.closed(), "Concurrent shutdown did not close the queue");
+        ++executed;
+    }), "Active task rejected");
+    require(closing.post([&] { executed += 100; }), "Pending task rejected");
+    std::thread stopper([&] {
+        active.wait();
+        closing.shutdown();
+        stopped.count_down();
+    });
+    const auto drained = closing.drain(10);
+    stopper.join();
+    require(drained.executed == 1 && drained.errors.empty() && executed == 1 && closing.pending() == 0,
+            "Concurrent shutdown ran queued work or lost the active invocation");
+    require(!closing.post([] {}), "Concurrent shutdown permitted new work");
+}
+
 } // namespace
 
 int main() {
@@ -239,6 +300,7 @@ int main() {
         service_shutdown();
         ui_order_limits_and_errors();
         ui_threads_and_shutdown();
+        ui_concurrent_delivery_and_shutdown();
         std::cout << "Runtime contract checks passed.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

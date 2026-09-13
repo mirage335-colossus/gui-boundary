@@ -140,6 +140,133 @@ void empty_zero_and_constrained_areas() {
     require(vacant.bounds.height == 6 && !gui::has_area(vacant.clip), "Empty container lost padding or clipping");
 }
 
+void shared_allocation_and_tiny_weights() {
+    const auto tiny = std::numeric_limits<double>::denorm_min();
+    const std::vector<gui::Allocation> allocations{{0, tiny}, {0, tiny}};
+    for (const auto axis : {gui::Axis::horizontal, gui::Axis::vertical}) {
+        const auto boxes = gui::arrange({2, 3, 0.25, 0.25}, axis, allocations);
+        require(boxes.size() == 2, "Allocation lost children");
+        if (axis == gui::Axis::horizontal)
+            require(boxes[0] == gui::Rect{2, 3, 0.125, 0.25} &&
+                    boxes[1] == gui::Rect{2.125, 3, 0.125, 0.25}, "Tiny horizontal weights lost their share");
+        else
+            require(boxes[0] == gui::Rect{2, 3, 0.25, 0.125} &&
+                    boxes[1] == gui::Rect{2, 3.125, 0.25, 0.125}, "Tiny vertical weights lost their share");
+    }
+    require_throws<std::invalid_argument>([&] {
+        gui::arrange({0, 0, 1, 1}, static_cast<gui::Axis>(99), allocations);
+    }, "Unknown layout axis accepted");
+
+    auto root = group("row", gui::LayoutKind::row, {leaf("zero", 0), leaf("first"), leaf("second")});
+    root.children[1].weight = tiny;
+    root.children[2].weight = tiny;
+    const auto box = gui::compose_layout(root, {2, 3, 0.25, 1}, [](std::string_view, double width) {
+        return gui::Size{width, 1};
+    });
+    require(box.children[0].bounds.width == 0 && box.children[1].bounds.width == 0.125 &&
+            box.children[2].bounds.width == 0.125, "Composed rows changed explicit zero or tiny weight allocation");
+
+    const std::vector<gui::Allocation> mixed{{20, 999}, {0, 1}, {0, 3}};
+    root.children[0].width = 20;
+    root.children[1].weight = 1;
+    root.children[2].weight = 3;
+    root.gap = 2;
+    for (const auto width : {0.0, 10.0, 24.0, 100.0, gui::coordinate_limit}) {
+        const auto direct = gui::arrange({0, 0, width, 1}, gui::Axis::horizontal, mixed, root.gap);
+        const auto composed = gui::compose_layout(root, {0, 0, width, 1}, [](std::string_view, double w) {
+            return gui::Size{w, 1};
+        });
+        for (std::size_t index = 0; index < direct.size(); ++index)
+            require(direct[index] == composed.children[index].bounds, "Direct and composed row allocation disagree");
+    }
+}
+
+void fractional_coordinate_boundary() {
+    const std::vector<std::pair<double, std::vector<double>>> cases{
+        {560999.21799959836, {58613.620543797406, 384391.65170005366, 103032.9594951168,
+            127895.95622763167, 517122.6807777377, 165341.53941432148}},
+        {225149.20453407016, {528249.91365672438, 862059.47869001643, 49638.744410509113,
+            991440.02202518703, 783317.20685757918, 546824.20517934905, 454494.92109901598,
+            570854.52540963935, 171122.89171113094, 689270.70271867106}}
+    };
+    for (const auto& [origin, weights] : cases) {
+        std::vector<gui::Allocation> allocations;
+        auto root = group("root", gui::LayoutKind::row, {});
+        for (std::size_t index = 0; index < weights.size(); ++index) {
+            allocations.push_back({0, weights[index]});
+            root.children.push_back(leaf(std::to_string(index)));
+            root.children.back().weight = weights[index];
+        }
+        const auto extent = gui::coordinate_limit - origin;
+        for (const auto axis : {gui::Axis::horizontal, gui::Axis::vertical}) {
+            const auto area = axis == gui::Axis::horizontal ? gui::Rect{origin, 0, extent, 1} :
+                gui::Rect{0, origin, 1, extent};
+            for (const auto rect : gui::arrange(area, axis, allocations)) {
+                require(gui::valid_rect(rect), "Translated allocation rounded outside the coordinate limit");
+                (void)gui::device_rect(rect, 1.25);
+            }
+        }
+        const auto composed = gui::compose_layout(root, {origin, 0, extent, 1}, [](std::string_view, double w) {
+            return gui::Size{w, 1};
+        });
+        for (const auto& box : gui::flatten_layout(composed))
+            (void)gui::device_rect(box.bounds, 1.25);
+    }
+
+    constexpr double origin = 267392.17687819182, extent = 732607.82312180824;
+    constexpr double leading_padding = 239259.70480972205;
+    for (const auto trailing_padding : {0.0, 0.01, 200000.0, gui::coordinate_limit}) {
+        auto padded = leaf("padded");
+        padded.height = extent;
+        padded.padding = {leading_padding, leading_padding, trailing_padding, trailing_padding};
+        const auto composed = gui::compose_layout(padded, {origin, origin, extent, extent},
+            [](std::string_view, double width) { return gui::Size{width, 1}; });
+        require(composed.content.x + composed.content.width <= composed.bounds.x + composed.bounds.width &&
+                composed.content.y + composed.content.height <= composed.bounds.y + composed.bounds.height,
+                "Fractional padding rounded content outside its parent");
+        for (const auto& box : gui::flatten_layout(composed))
+            (void)gui::device_rect(box.content, 1.25);
+    }
+
+    const gui::Rect across_zero{-861040.13262529613, -441720.32158836682, 1000000, 1000000};
+    auto padded = leaf("across-zero");
+    padded.height = across_zero.height;
+    padded.padding = {378282.07432594924, 320178.15744318085, 0, 0};
+    const auto composed = gui::compose_layout(padded, across_zero,
+        [](std::string_view, double width) { return gui::Size{width, 1}; });
+    const auto inside = [&](gui::Rect rect) {
+        require(gui::valid_rect(rect) && rect.x + rect.width <= across_zero.x + across_zero.width &&
+                rect.y + rect.height <= across_zero.y + across_zero.height,
+                "Coordinate cancellation rounded beyond the inherited endpoint");
+    };
+    inside(composed.content);
+    // This independently constructed valid rectangle extends past the parent;
+    // intersection must not round its clipped endpoint back outside that parent.
+    inside(gui::intersect(across_zero, {-482758.05829934689, -121542.16414518596, 1000000, 1000000}));
+    for (const auto axis : {gui::Axis::horizontal, gui::Axis::vertical}) {
+        const auto lead = axis == gui::Axis::horizontal ? padded.padding.left : padded.padding.top;
+        const std::vector<gui::Allocation> allocations{{lead, 0}, {0, 1}};
+        for (const auto rect : gui::arrange(across_zero, axis, allocations)) inside(rect);
+    }
+}
+
+void translated_parent_containment() {
+    auto root = group("translated", gui::LayoutKind::row, {leaf("first"), leaf("middle"), leaf("last")});
+    root.padding = {5.2445452627777609, 0, 6.9380990397386348, 0};
+    root.gap = 5.1955640280940854;
+    root.children[0].weight = 0.31991330809500174;
+    root.children[1].weight = 0.40673815872072555;
+    root.children[2].weight = 0.010430003742940151;
+    const auto box = gui::compose_layout(root, {322.89392466042978, 0, 92.162373411747382, 10},
+        [](std::string_view, double width) { return gui::Size{width, 1}; });
+    for (const auto& child : box.children)
+        require(child.bounds.x >= box.content.x &&
+                child.bounds.x + child.bounds.width <= box.content.x + box.content.width,
+                "Translated child bounds rounded outside their parent's content width");
+    for (const auto& child : gui::flatten_layout(box))
+        (void)gui::device_rect(child.bounds, 1.25);
+}
+
 void bounds_and_input_validation() {
     const auto metric = [](std::string_view, double width) { return gui::Size{width, gui::coordinate_limit}; };
     auto root = group("root", gui::LayoutKind::column, {leaf("one"), leaf("two"), leaf("three")});
@@ -207,6 +334,9 @@ int main() {
         weighted_rows_and_nested_height();
         wrapped_measurement_and_recomposition();
         empty_zero_and_constrained_areas();
+        shared_allocation_and_tiny_weights();
+        fractional_coordinate_boundary();
+        translated_parent_containment();
         bounds_and_input_validation();
         std::cout << "Composed layout checks passed.\n";
     } catch (const std::exception& error) {

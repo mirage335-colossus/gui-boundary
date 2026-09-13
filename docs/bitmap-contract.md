@@ -69,6 +69,10 @@ void(const gui::BitmapRequest&, const gui::BitmapSink&)
 
 Construct it with `BitmapSource(Paint)`, copy it to retain the producer,
 and call `source.paint(request, sink)` to obtain pixels synchronously.
+The call retains its executing producer until return, even if a synchronous
+receiver releases or replaces the last external source handle. This protects
+the callable and its captures; borrowed request/sink arguments must still remain
+alive for the call, and an owning adapter must not be destroyed from its paint.
 The wrapper validates every emitted block before passing it to the receiver.
 Empty damage skips the producer and needs no sink.
 A nonempty source with nonempty damage requires a callable sink.

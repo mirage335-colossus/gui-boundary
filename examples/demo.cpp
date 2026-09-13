@@ -15,7 +15,8 @@ int main() {
         adapter.open_popup({"choice",1});adapter.choose_popup({"choice",1},1);
         example.select_editor();adapter.replace({"editor",1},"Updated text");
         adapter.send(gui::WidgetEvent{{"button",1},gui::Activate{}});
-        adapter.send(gui::WidgetEvent{{"bitmap",1},gui::InvokeAction{"refresh"}});
+        if(!example.show_bitmap_actions())throw std::runtime_error("Bitmap actions unavailable");
+        adapter.choose_popup({"bitmap",1},0);
         adapter.enter({"editor",1});adapter.repaint({"bitmap",1});
         if(const auto request=example.next_service()) {
             // A native root executes the host request and returns its actual result.
@@ -27,6 +28,9 @@ int main() {
             throw std::runtime_error("UI update rejected");
         const auto drained=queue.drain(8);
         if(!drained.errors.empty())std::rethrow_exception(drained.errors.front());
+        // Call on each native tick, even with no fresh input or changed values.
+        // A native callback catches a failure and schedules another attempt or close.
+        example.retry_presentation();
         const auto& view=example.view();
         std::cout<<"Selected option: "<<*gui::find_widget(view,{"choice",1})->state.selected
                  <<"\nText: "<<gui::find_widget(view,{"editor",1})->state.text

@@ -134,9 +134,38 @@ void interior_scroll_reaches_content() {
     view.widgets[0].state.content_clip=Rect{0,0,0,0};adapter.present(view);
     check(!adapter.resolved_availability(child.spec.key).visible,"Empty interior left a visible child");
 }
+void bitmap_action_popup() {
+    std::vector<Event> events;MemoryAdapter memory([&](const Event& event){events.push_back(event);});Adapter& adapter=memory;
+    Snapshot view;auto bitmap=make("bitmap",Kind::bitmap,{0,0,10,10});
+    bitmap.state.actions={{"first","Same label","",true},{"second","Same label","",true}};
+    view.widgets={bitmap};adapter.present(view);
+    check(adapter.open_popup(bitmap.spec.key),"Abstract boundary could not open bitmap actions");
+    std::swap(view.widgets[0].state.actions[0],view.widgets[0].state.actions[1]);adapter.present(view);
+    check(memory.choose_popup(bitmap.spec.key,0)==Delivery::delivered,"Bitmap action popup did not dispatch");
+    check(std::get<InvokeAction>(std::get<WidgetEvent>(events.back()).input).id=="first",
+          "Bitmap popup reorder changed action identity");
+    check(memory.choose_popup(bitmap.spec.key,0)==Delivery::ignored,"Completed bitmap popup retained its displayed items");
+    check(adapter.open_popup(bitmap.spec.key),"Reordered bitmap popup did not reopen");
+    view.widgets[0].state.actions[0].enabled=false;adapter.present(view);
+    check(memory.choose_popup(bitmap.spec.key,0)==Delivery::ignored,"Disabled current bitmap action dispatched");
+    check(adapter.open_popup(bitmap.spec.key),"Disabled bitmap action popup did not reopen");
+    view.widgets[0].state.actions[0].enabled=true;adapter.present(view);
+    check(memory.choose_popup(bitmap.spec.key,0)==Delivery::ignored,"Disabled displayed bitmap action dispatched");
+    adapter.open_popup(bitmap.spec.key);view.widgets[0].state.actions.erase(view.widgets[0].state.actions.begin());adapter.present(view);
+    check(memory.choose_popup(bitmap.spec.key,0)==Delivery::ignored,"Removed bitmap action dispatched");
+    adapter.open_popup(bitmap.spec.key);adapter.close_popup(bitmap.spec.key);
+    check(memory.choose_popup(bitmap.spec.key,0)==Delivery::ignored,"Abstract boundary did not dismiss bitmap actions");
+    adapter.open_popup(bitmap.spec.key);view.widgets[0].state.visible=false;adapter.present(view);
+    view.widgets[0].state.visible=true;adapter.present(view);
+    check(memory.choose_popup(bitmap.spec.key,0)==Delivery::ignored&&events.size()==1,
+          "Unavailable bitmap retained an action popup or silent commands emitted input");
+    view.widgets[0].state.actions.clear();adapter.present(view);
+    check(!adapter.open_popup(bitmap.spec.key),"Empty bitmap action popup opened");
+}
 }
 int main() {
-    try {public_commands();measured_requests_and_guards();group_interior_and_actions();interior_scroll_reaches_content();shared_example();
+    try {public_commands();measured_requests_and_guards();group_interior_and_actions();interior_scroll_reaches_content();
+        bitmap_action_popup();shared_example();
         std::cout<<"Public adapter checks passed\n";
     } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

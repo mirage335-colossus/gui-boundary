@@ -171,6 +171,27 @@ void source_contract() {
     check(gray.pixels() == std::vector<std::uint8_t>({255,128,255,128}), "solid source packed padding");
 }
 
+void source_release_during_paint() {
+    auto content = std::make_shared<const std::uint8_t>(42);
+    const std::weak_ptr<const std::uint8_t> lifetime = content;
+    BitmapSource source([content](const BitmapRequest&, const BitmapSink& sink) {
+        sink(0, 0, {1, 1, 1, PixelFormat::gray8, {content.get(), 1}});
+        // A producer can emit multiple blocks after the receiver releases its
+        // original handle; all immutable captures must still be usable.
+        sink(1, 0, {1, 1, 1, PixelFormat::gray8, {content.get(), 1}});
+    });
+    content.reset();
+    unsigned calls = 0;
+    source.paint(full_bitmap_request(2, 1, PixelFormat::gray8), [&](unsigned, unsigned, PixelBlock block) {
+        source = {};
+        check(!lifetime.expired(), "releasing a source destroyed an executing producer");
+        check(block.bytes[0] == 42, "released source lost its owned pixels");
+        ++calls;
+    });
+    check(calls == 2 && lifetime.expired(), "paint did not release its temporary producer retention");
+    source.paint(full_bitmap_request(2, 1, PixelFormat::gray8), {});
+}
+
 void surface_lifecycle() {
     BitmapSurface surface;
     check(!surface.repaint() && !surface.dirty(), "default surface should be clean");
@@ -303,7 +324,7 @@ void copy_move_lifetime() {
 
 int main() {
     try {
-        storage_validation(); conversion_and_overlap(); source_contract();
+        storage_validation(); conversion_and_overlap(); source_contract(); source_release_during_paint();
         surface_lifecycle(); replacement_and_failures(); copy_move_lifetime();
         std::cout << "Bitmap contract checks passed\n";
         return 0;

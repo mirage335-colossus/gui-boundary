@@ -37,6 +37,12 @@ resources before committing visible changes and preserve the transactional
 contract if either preparation fails. Mechanical forwarding does not grant
 permission to create a second copy of those decisions in each backend.
 
+For event acceptance without retained native mechanics, use the public
+`normalize_event` / `normalize_widget_event` helpers with the validated current
+snapshot and retained group scroll offsets. `MemoryAdapter` delegates to these
+helpers. The shared application can revalidate a queued event against its newer
+authoritative state using the same implementation.
+
 A production implementation may factor the same facilities into smaller shared
 components for performance. Preserve the same conformance tests and a single
 authoritative implementation of each rule when doing so. No native adapter is
@@ -169,6 +175,10 @@ meaning remains in shared handling, which can call the same operation used by
 pointer input. The adapter never synthesizes application coordinates to emulate
 a keyboard action.
 
+The application can request that chooser through `Adapter::open_popup(bitmap_key)`
+and dismiss it through `close_popup`. The reference's `choose_popup` probe emits
+`InvokeAction`, using the same displayed-ID lifetime rules as ordinary menus.
+
 ## 4. Bitmap call path
 
 ```text
@@ -234,6 +244,16 @@ operation, retains any borrowed titles/defaults, and returns a `ServiceResult`
 carrying the same ID. `complete` validates identity and payload before the result
 reaches shared handling. A file chooser returns a path; shared handling performs
 any subsequent file read or write.
+
+A successful host operation must not be repeated merely because presenting its
+result fails. The example retains authoritative values and accepted service
+replies, stages layout in a separate snapshot, and exposes `retry_presentation`
+for the next host tick or error-recovery attempt. Its pending flag clears only
+after `present` succeeds. Ordinary input retries pending presentation before
+using its geometry; a new resize can replace a failed oversized grid, and close
+does not wait for successful measurement. The native callback must catch errors
+and arrange another attempt or the shared close path. Permanent failures require
+error handling; a tight retry loop is inappropriate.
 
 Native event pumping and queued completion processing must continue even when
 no presentation changed. Open popups, prompts, and file choosers must not stall

@@ -9,6 +9,8 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -264,6 +266,66 @@ inline void validate_snapshot(const Snapshot& view) {
         }
         text(v.bitmap.source_id);
     }
+}
+// Shared event policy for an already validated presentation. Scroll offsets
+// must match the presentation being checked. A successful normalization may
+// convert SelectRecord into its declared combined ActivateRecord; callers must
+// discard events for which this returns false. Lifetime and dispatch guards
+// remain the adapter's responsibility.
+inline bool normalize_widget_event(const Snapshot& view,WidgetEvent& event,const ScrollLookup& scroll={}) {
+    const auto* w=find_widget(view,event.target);const auto a=availability(view,event.target,scroll);
+    if(!w||!a.visible||!a.enabled)return false;
+    const auto kind=w->spec.kind;
+    // Convert configured row selection into one combined activation event.
+    if(auto* select=std::get_if<SelectRecord>(&event.input);select&&w->spec.activate_on_select)
+        for(const auto& row:w->state.records)if(row.id==select->id&&row.activatable) {
+            auto id=select->id;event.input=ActivateRecord{std::move(id)};break;
+        }
+    return std::visit([&](const auto& input)->bool {
+        using T=std::decay_t<decltype(input)>;
+        if constexpr(std::is_same_v<T,Activate>)return kind==Kind::button;
+        else if constexpr(std::is_same_v<T,SetChecked>)return kind==Kind::toggle&&input.value!=w->state.checked;
+        else if constexpr(std::is_same_v<T,EditText>)return kind==Kind::text&&!w->spec.text_policy.read_only&&
+            input.base_text==w->state.text&&input.value!=w->state.text&&text_error(input.value,w->spec.text_policy).empty();
+        else if constexpr(std::is_same_v<T,ChooseOption>) {
+            if(kind!=Kind::choice&&kind!=Kind::text&&kind!=Kind::menu)return false;
+            if(kind==Kind::text&&w->spec.text_policy.read_only)return false;
+            for(const auto& option:w->state.options)if(option.id==input.id)
+                return option.enabled&&(kind!=Kind::choice||w->state.selected!=option.id);
+            return false;
+        } else if constexpr(std::is_same_v<T,SelectRecord>||std::is_same_v<T,ActivateRecord>) {
+            if(kind!=Kind::list)return false;
+            for(const auto& row:w->state.records)if(row.id==input.id)
+                return row.enabled&&(!std::is_same_v<T,ActivateRecord>||row.activatable);
+            return false;
+        } else if constexpr(std::is_same_v<T,SubmitText>)return kind==Kind::text&&
+            !w->spec.text_policy.read_only&&w->spec.text_policy.submit!=SubmitKey::none;
+        else if constexpr(std::is_same_v<T,InvokeAction>) {
+            if(kind!=Kind::bitmap)return false;
+            for(const auto& action:w->state.actions)if(action.id==input.id)return action.enabled;
+            return false;
+        } else {
+            switch(input.kind) {case PointerKind::click:case PointerKind::double_click:case PointerKind::move:case PointerKind::wheel:break;
+                default:return false;}
+            return w->spec.pointer_input&&contains(a.clip,input.position)&&
+                std::isfinite(input.wheel_x)&&std::isfinite(input.wheel_y)&&
+                (input.kind!=PointerKind::wheel||input.wheel_x!=0||input.wheel_y!=0);
+        }
+    },event.input);
+}
+inline bool normalize_event(const Snapshot& view,Event& event,const ScrollLookup& scroll={}) {
+    return std::visit([&](auto& value)->bool {
+        using T=std::decay_t<decltype(value)>;
+        if constexpr(std::is_same_v<T,WidgetEvent>)return normalize_widget_event(view,value,scroll);
+        else if constexpr(std::is_same_v<T,PageEvent>) {
+            for(const auto& page:view.pages)if(page.id==value.id)
+                return page.enabled&&page.visible&&view.active_page!=page.id;
+            return false;
+        } else if constexpr(std::is_same_v<T,ResizeEvent>) {
+            return valid_rect({0,0,value.client_size.width,value.client_size.height})&&
+                std::isfinite(value.display_scale)&&value.display_scale>0&&value.display_scale<=16;
+        } else return true;
+    },event);
 }
 // The adapter owns native objects. The caller retains application state.
 // All methods run on the UI thread. present() and focus/scroll never emit input.

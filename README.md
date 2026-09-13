@@ -21,6 +21,8 @@ The package includes:
   required when adding a native adapter.
 - [Boundary audit](docs/audit.md): corrected gaps, edit ownership, duplication
   assessment, verification results, and remaining capability limits.
+- [Feature recipes and completeness inventory](docs/feature-recipes.md): shared-side
+  examples for the essential operations and explicit limits of the vocabulary.
 - [Shared application example](examples/application.hpp), [display-free runner](examples/demo.cpp),
   and [public headers](include/gui).
 
@@ -78,6 +80,11 @@ operations; native callback probes and CPU image inspection remain on the
 reference implementation. It is a reusable core specification, not an inventory
 of every control or host capability a future application could require.
 Additional primitives or service kinds require a documented contract extension.
+
+This standalone API is separate from the integrated application interfaces that
+informed the audit. Those native backends do not implement `gui::Adapter` and
+are not supplied as portable backends for this package. Feature insulation inside
+an application and extracting a drop-in toolkit library are different milestones.
 
 Native adapters still have to implement and verify actual controls, glyphs,
 keyboard/accessibility behavior, service execution, and event-loop progress.

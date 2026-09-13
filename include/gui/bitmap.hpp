@@ -133,7 +133,10 @@ public:
         validate_bitmap_request(request);
         if (bitmap_detail::empty(request.damage) || !paint_) return;
         if (!sink) throw std::invalid_argument("bitmap sink is empty");
-        (*paint_)(request, [&](unsigned x, unsigned y, PixelBlock block) {
+        // A synchronous receiver may release its last source handle. Keep the
+        // running callable and its immutable captured content alive until return.
+        const auto paint = paint_;
+        (*paint)(request, [&](unsigned x, unsigned y, PixelBlock block) {
             validate_pixel_block(block);
             bitmap_detail::contained({x, y, block.width, block.height}, request.damage);
             if (block.format != request.format)

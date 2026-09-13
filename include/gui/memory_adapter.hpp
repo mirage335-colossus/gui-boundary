@@ -149,17 +149,22 @@ public:
     }
     bool open_popup(const WidgetKey& key) override {
         require_mutable();const auto* w=find_widget(snapshot_,key);const auto a=resolve_availability(snapshot_,entries_,key);
-        if(!w||!a.enabled||!a.visible||w->state.options.empty()||
-           (w->spec.kind!=Kind::choice&&w->spec.kind!=Kind::menu&&w->spec.kind!=Kind::text)||
-           (w->spec.kind==Kind::text&&w->spec.text_policy.read_only))return false;
-        at(key).popup=w->state.options;return true;
+        if(!w||!a.enabled||!a.visible)return false;
+        const bool actions=w->spec.kind==Kind::bitmap;
+        if(!actions&&w->spec.kind!=Kind::choice&&w->spec.kind!=Kind::menu&&w->spec.kind!=Kind::text)return false;
+        if(w->spec.kind==Kind::text&&w->spec.text_policy.read_only)return false;
+        const auto& options=actions?w->state.actions:w->state.options;
+        if(options.empty())return false;
+        at(key).popup=options;return true;
     }
     Delivery choose_popup(const WidgetKey& key,std::size_t index) {
         require_mutable();auto found=entries_.find(key.id);
         if(found==entries_.end()||found->second.spec.key!=key||!found->second.popup)return Delivery::ignored;
         auto displayed=std::move(*found->second.popup);found->second.popup.reset();
         if(index>=displayed.size()||!displayed[index].enabled)return Delivery::ignored;
-        return send(WidgetEvent{key,ChooseOption{displayed[index].id}});
+        const auto input=found->second.spec.kind==Kind::bitmap?
+            Input{InvokeAction{displayed[index].id}}:Input{ChooseOption{displayed[index].id}};
+        return send(WidgetEvent{key,input});
     }
     void close_popup(const WidgetKey& key) override {require_mutable();at(key).popup.reset();}
     Delivery list_key(const WidgetKey& key,ListKey input) {
@@ -191,17 +196,7 @@ public:
     // Entry point used by a native callback after translating its input.
     Delivery send(Event event) {
         require_thread();require_not_painting();if(closed_||dispatching_)return Delivery::ignored;
-        const bool accepted=std::visit([&](auto& value)->bool {
-            using T=std::decay_t<decltype(value)>;
-            if constexpr(std::is_same_v<T,WidgetEvent>)return accept_widget(value);
-            else if constexpr(std::is_same_v<T,PageEvent>) {
-                for(const auto& p:snapshot_.pages)if(p.id==value.id)return p.enabled&&p.visible&&snapshot_.active_page!=p.id;
-                return false;
-            } else if constexpr(std::is_same_v<T,ResizeEvent>) {
-                return valid_rect({0,0,value.client_size.width,value.client_size.height})&&
-                    std::isfinite(value.display_scale)&&value.display_scale>0&&value.display_scale<=16;
-            } else return true;
-        },event);
+        const bool accepted=normalize_event(snapshot_,event,[&](const WidgetKey& group){return at(group).offset;});
         if(!accepted||!sink_)return Delivery::ignored;
         struct Guard {bool& flag;explicit Guard(bool& f):flag(f){flag=true;}~Guard(){flag=false;}} guard(dispatching_);
         auto callback=sink_;callback(event);return Delivery::delivered;
@@ -317,46 +312,6 @@ private:
         else if(bottom>offset.y+w->state.bounds.height)offset.y=bottom-w->state.bounds.height;
         scroll(key,offset);
     }
-    bool accept_widget(WidgetEvent& event) const {
-        const auto* w=find_widget(snapshot_,event.target);const auto a=resolve_availability(snapshot_,entries_,event.target);
-        if(!w||!a.visible||!a.enabled)return false;
-        const auto kind=w->spec.kind;
-        // Convert configured row selection into one combined activation event.
-        if(auto* select=std::get_if<SelectRecord>(&event.input);select&&w->spec.activate_on_select)
-            for(const auto& row:w->state.records)if(row.id==select->id&&row.activatable) {
-                auto id=select->id;event.input=ActivateRecord{std::move(id)};break;
-            }
-        return std::visit([&](const auto& input)->bool {
-            using T=std::decay_t<decltype(input)>;
-            if constexpr(std::is_same_v<T,Activate>)return kind==Kind::button;
-            else if constexpr(std::is_same_v<T,SetChecked>)return kind==Kind::toggle&&input.value!=w->state.checked;
-            else if constexpr(std::is_same_v<T,EditText>)return kind==Kind::text&&!w->spec.text_policy.read_only&&
-                input.base_text==w->state.text&&input.value!=w->state.text&&text_error(input.value,w->spec.text_policy).empty();
-            else if constexpr(std::is_same_v<T,ChooseOption>) {
-                if(kind!=Kind::choice&&kind!=Kind::text&&kind!=Kind::menu)return false;
-                if(kind==Kind::text&&w->spec.text_policy.read_only)return false;
-                for(const auto& option:w->state.options)if(option.id==input.id)
-                    return option.enabled&&(kind!=Kind::choice||w->state.selected!=option.id);
-                return false;
-            } else if constexpr(std::is_same_v<T,SelectRecord>||std::is_same_v<T,ActivateRecord>) {
-                if(kind!=Kind::list)return false;
-                for(const auto& row:w->state.records)if(row.id==input.id)
-                    return row.enabled&&(!std::is_same_v<T,ActivateRecord>||row.activatable);
-                return false;
-            } else if constexpr(std::is_same_v<T,SubmitText>)return kind==Kind::text&&
-                !w->spec.text_policy.read_only&&w->spec.text_policy.submit!=SubmitKey::none;
-            else if constexpr(std::is_same_v<T,InvokeAction>) {
-                if(kind!=Kind::bitmap)return false;
-                for(const auto& action:w->state.actions)if(action.id==input.id)return action.enabled;
-                return false;
-            } else {
-                switch(input.kind) {case PointerKind::click:case PointerKind::double_click:case PointerKind::move:case PointerKind::wheel:break;
-                    default:return false;}
-                return w->spec.pointer_input&&contains(a.clip,input.position)&&
-                    std::isfinite(input.wheel_x)&&std::isfinite(input.wheel_y)&&
-                    (input.kind!=PointerKind::wheel||input.wheel_x!=0||input.wheel_y!=0);
-            }
-        },event.input);
-    }
+
 };
 }

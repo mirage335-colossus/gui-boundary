@@ -45,6 +45,11 @@ A row first totals its declared fixed widths and the gaps between children.
 It divides the nonnegative remaining width among children with absent widths, in proportion to their weights.
 Weight zero gets no remaining width, and a row whose eligible weights are all zero leaves that width unused.
 Fixed widths do not participate in sharing, even when their declared value is zero.
+Row measurement delegates allocation to `arrange`; there is one implementation
+of fixed/weighted allocation. Weights are normalized before summing, so tiny
+positive weights still divide the available space. An explicit zero width maps
+to zero fixed extent and zero weight, preserving its distinction from automatic
+width. Unknown `Axis` values are rejected.
 If fixed widths and gaps exceed the available width, actual widths are clamped in declaration order.
 Later children can therefore receive less than their requested width or zero width.
 Gap advancement is also clamped to the row's interior edge, preventing horizontal allocation outside it.
@@ -124,6 +129,10 @@ Trees are limited to `layout_depth_limit` levels including the root and `layout_
 These constants are `128` and `100000`; exceeding either throws `std::invalid_argument`.
 Measurement results receive the same extent validation.
 Automatic height accumulation saturates at the coordinate limit, and placement caps rectangles at the remaining representable coordinate extent.
+Allocation, padding, placement, and intersection constrain reconstructed
+floating-point endpoints to their agreed edges. Fractional origins, including
+negative origins crossing zero, must not make a valid layout fail later
+rectangle validation through outward rounding.
 Excess padding yields zero interior space; constrained widths and clipped areas never become negative.
 `flatten_layout` separately validates IDs, structural limits, and rectangle validity in an externally supplied `LayoutBox` tree.
 It does not prove that an externally constructed tree obeys the composition rules; use `compose_layout` for that guarantee.

@@ -174,6 +174,16 @@ must repeat checks against its current authoritative state if that state can
 advance before presentation. A delayed callback cannot make a hidden, disabled,
 removed, or replaced target eligible again.
 
+`normalize_event(snapshot, event, scroll_lookup)` implements these checks once
+for adapters and shared handlers. It returns acceptance and normalizes a declared
+select-and-activate interaction in place. `normalize_widget_event` is the same
+operation for a widget event alone. The snapshot must already be validated;
+the lookup supplies current group offsets, or its omission means zero scrolling.
+These helpers do not dispatch or mutate the snapshot. The caller separately
+enforces its lifecycle and callback guards. The shared example uses this helper
+against its own model, including when an accepted event was queued before the
+model changed.
+
 `Delivery::delivered` means the event reached the sink. It does not mean an
 application operation completed or that a value was accepted. The application
 publishes the resulting state. An ignored input emits no application event and
@@ -383,6 +393,7 @@ a control's label.
 | `validate_snapshot` | Complete snapshot | Success or exception; no mutation |
 | `find_widget` | Snapshot, exact key | Borrowed pointer valid while that snapshot stays unchanged, or null |
 | `availability` | Snapshot, key, optional scroll lookup | Resolved bounds, clip, visibility, enablement |
+| `normalize_event`, `normalize_widget_event` | Validated current snapshot, mutable event, optional scroll lookup | Acceptance boolean and declared activation normalization; no dispatch or model mutation |
 | `Adapter::present` | Owned snapshot | Create/update/remove retained presentation silently |
 | `Adapter::measure_text` | Owned literal text, font, wrap, available width, display scale | Finite logical text extents; no mutation or input |
 | `Adapter::resolved_availability` | Exact key | Current resolved bounds, clip, visibility, enablement |
@@ -391,7 +402,7 @@ a control's label.
 | `Adapter::focus_next` | Reverse flag | Move to next eligible target; success boolean |
 | `Adapter::scroll`, `Adapter::scroll_offset` | Exact key; offset for setter | Silent clamped group/text/list scroll change or current offset |
 | `Adapter::text_selection` getter/setter | Exact text key; selection for setter | Read/write retained clamped editor selection silently |
-| `Adapter::open_popup`, `Adapter::close_popup` | Exact choice/menu/text key | Open available option popup (success boolean) or dismiss silently |
+| `Adapter::open_popup`, `Adapter::close_popup` | Exact choice/menu/text/bitmap key | Open available option or bitmap-action popup (success boolean), or dismiss silently |
 | `Adapter::invalidate` | Exact bitmap key, pixel damage | Mark retained pixels for repaint without changing content identity |
 | `Adapter::close` | None | Idempotent permanent teardown |
 | `MemoryAdapter::send` | Owned event | `Delivery` after validation and synchronous sink call |

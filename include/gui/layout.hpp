@@ -68,9 +68,14 @@ inline double inset_width(double width, double left, double right) {
 inline Rect inset(Rect bounds, LayoutPadding padding) {
     const auto left = std::min(bounds.width, padding.left);
     const auto top = std::min(bounds.height, padding.top);
-    return {bounds.x + left, bounds.y + top,
-        std::max(0.0, bounds.width - left - std::min(bounds.width - left, padding.right)),
-        std::max(0.0, bounds.height - top - std::min(bounds.height - top, padding.bottom))};
+    const auto x = bounds.x + left, y = bounds.y + top;
+    // Padding is measured locally, but its translated origin may round up.
+    // Clamp each remaining extent against the parent's absolute endpoint.
+    return {x, y,
+        std::min(geometry_detail::extent_to(x, bounds.x + bounds.width),
+            std::max(0.0, bounds.width - left - std::min(bounds.width - left, padding.right))),
+        std::min(geometry_detail::extent_to(y, bounds.y + bounds.height),
+            std::max(0.0, bounds.height - top - std::min(bounds.height - top, padding.bottom)))};
 }
 
 inline void identify(std::string_view id, std::size_t depth, std::size_t& count,
@@ -123,29 +128,17 @@ inline Measured measure(const LayoutNode& node, double available_width, const La
             content_height = add(content_height, result.children.back().height);
         }
     } else {
-        double fixed = 0, gaps = 0, largest_weight = 0;
-        for (std::size_t index = 0; index < node.children.size(); ++index) {
-            const auto& child = node.children[index];
-            if (index != 0) gaps = add(gaps, node.gap);
-            if (child.width) fixed = add(fixed, *child.width);
-            else largest_weight = std::max(largest_weight, child.weight);
-        }
-        // Normalize first so even a large set of large weights has a bounded sum.
-        double total_weight = 0;
-        if (largest_weight > 0) {
-            for (const auto& child : node.children)
-                if (!child.width) total_weight += child.weight / largest_weight;
-        }
-        const auto flexible = std::max(0.0, inner_width - fixed - gaps);
-        double cursor = 0;
+        std::vector<Allocation> allocations;
+        allocations.reserve(node.children.size());
+        for (const auto& child : node.children)
+            // arrange uses fixed=0 for automatic allocation. A declared zero
+            // width is represented by zero weight so it receives no free space.
+            allocations.push_back({child.width.value_or(0), child.width ? 0 : child.weight});
+        const auto columns = arrange({0, 0, inner_width, 0}, Axis::horizontal, allocations, node.gap);
         result.children.reserve(node.children.size());
-        for (const auto& child : node.children) {
-            const auto desired = child.width.value_or(total_weight > 0
-                ? flexible * ((child.weight / largest_weight) / total_weight) : 0);
-            const auto width = std::min(std::max(0.0, inner_width - cursor), desired);
-            result.children.push_back(measure(child, width, callback));
+        for (std::size_t index = 0; index < node.children.size(); ++index) {
+            result.children.push_back(measure(node.children[index], columns[index].width, callback));
             content_height = std::max(content_height, result.children.back().height);
-            cursor = std::min(inner_width, add(add(cursor, width), node.gap));
         }
     }
     result.height = node.height.value_or(add(add(node.padding.top, content_height), node.padding.bottom));
@@ -153,23 +146,24 @@ inline Measured measure(const LayoutNode& node, double available_width, const La
 }
 
 inline LayoutBox place(const Measured& measured, double x, double y, Rect inherited_clip,
-                       std::optional<double> forced_height = {}) {
+                       double assigned_height, double right_edge) {
     const auto& node = *measured.node;
-    const auto height = std::min(forced_height.value_or(measured.height), coordinate_limit - std::max(0.0, y));
-    LayoutBox result{node.id, {x, y, measured.width, height}, {}, {}, {}};
+    const auto width = std::min(measured.width, geometry_detail::extent_to(x, right_edge));
+    const auto height = std::min(assigned_height, geometry_detail::extent_to(y, coordinate_limit));
+    LayoutBox result{node.id, {x, y, width, height}, {}, {}, {}};
     result.content = inset(result.bounds, node.padding);
     result.clip = intersect(result.bounds, inherited_clip);
     const auto child_clip = intersect(result.content, result.clip);
     result.children.reserve(measured.children.size());
+    const auto child_right = result.content.x + result.content.width;
     double cursor = node.kind == LayoutKind::row ? result.content.x : result.content.y;
     for (const auto& child : measured.children) {
         if (node.kind == LayoutKind::row) {
-            const auto fill_height = node.equal_height && !child.node->height
-                ? std::optional<double>{result.content.height} : std::nullopt;
-            result.children.push_back(place(child, cursor, result.content.y, child_clip, fill_height));
-            cursor = std::min(result.content.x + result.content.width, cursor + child.width + node.gap);
+            const double child_height = node.equal_height && !child.node->height ? result.content.height : child.height;
+            result.children.push_back(place(child, cursor, result.content.y, child_clip, child_height, child_right));
+            cursor = std::min(child_right, cursor + result.children.back().bounds.width + node.gap);
         } else {
-            result.children.push_back(place(child, result.content.x, cursor, child_clip));
+            result.children.push_back(place(child, result.content.x, cursor, child_clip, child.height, child_right));
             cursor = std::min(coordinate_limit, cursor + result.children.back().bounds.height + node.gap);
         }
     }
@@ -197,7 +191,7 @@ inline LayoutBox compose_layout(const LayoutNode& root, Rect viewport, const Lay
     std::unordered_set<std::string> ids;
     layout_detail::validate(root, 1, count, ids, static_cast<bool>(measure));
     const auto measured = layout_detail::measure(root, viewport.width, measure);
-    return layout_detail::place(measured, viewport.x, viewport.y, viewport);
+    return layout_detail::place(measured, viewport.x, viewport.y, viewport, measured.height, viewport.x + viewport.width);
 }
 
 // Return parent-before-child owned records. Each record's children vector is

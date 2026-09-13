@@ -21,7 +21,7 @@ endfunction()
 
 gui_executable(gui_example examples/demo.cpp)
 if(BUILD_TESTING)
-    foreach(name contract bitmap runtime layout adapter)
+    foreach(name contract bitmap runtime layout adapter application)
         gui_executable(${name}_test tests/${name}_test.cpp)
         add_test(NAME ${name} COMMAND ${name}_test)
     endforeach()

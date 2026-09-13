@@ -236,10 +236,48 @@ void bitmap_callback_lifetime() {
           "Paint guard blocked later event delivery");
     adapter.close();check(adapter.closed(),"Paint guard blocked later close");
 }
+void shared_event_normalization() {
+    auto view=fixture();view.widgets[2].spec.activate_on_select=true;
+    auto normalize=[&](Event event){return normalize_event(view,event);};
+    Event selection=WidgetEvent{{"list",1},SelectRecord{"a"}};
+    check(normalize_event(view,selection)&&
+          std::get<ActivateRecord>(std::get<WidgetEvent>(selection).input).id=="a",
+          "Shared policy did not combine declared list selection and activation");
+    check(normalize_event(view,selection),"Already normalized activation failed a repeated authoritative check");
+    check(!normalize(WidgetEvent{{"list",1},SelectRecord{"b"}})&&
+          !normalize(WidgetEvent{{"list",1},ActivateRecord{"missing"}}),"Ineligible shared row input was accepted");
+    view.widgets[2].state.records[1].enabled=true;
+    selection=WidgetEvent{{"list",1},SelectRecord{"b"}};
+    check(normalize_event(view,selection)&&std::holds_alternative<SelectRecord>(std::get<WidgetEvent>(selection).input),
+          "Nonactivatable shared row was converted to activation");
+    view.widgets[1].spec.text_policy.read_only=true;
+    view.widgets[1].state.options={{"empty","Clear","",true}};
+    check(!normalize(WidgetEvent{{"editor",1},EditText{"new","ab"}})&&
+          !normalize(WidgetEvent{{"editor",1},ChooseOption{"empty"}})&&
+          !normalize(WidgetEvent{{"editor",1},SubmitText{}}),"Read-only shared editor accepted mutation");
+    view.widgets[1].spec.text_policy.read_only=false;
+    check(normalize(WidgetEvent{{"editor",1},ChooseOption{"empty"}}),"Valid empty suggestion was rejected");
+    check(!normalize(WidgetEvent{{"editor",1},EditText{"new","stale"}})&&
+          !normalize(WidgetEvent{{"editor",1},EditText{"\xc0\x80","ab"}})&&
+          !normalize(WidgetEvent{{"button",2},Activate{}}),"Shared policy accepted invalid text or a stale generation");
+    check(normalize(PageEvent{"two"})&&!normalize(PageEvent{"one"})&&!normalize(PageEvent{"missing"}),
+          "Shared page eligibility failed");
+    check(normalize(ResizeEvent{{0,0},16})&&!normalize(ResizeEvent{{-1,1},1})&&
+          !normalize(ResizeEvent{{1,1},17})&&normalize(CloseEvent{}),"Shared lifecycle input validation failed");
+    auto group=widget("group",Kind::group,{100,0,30,30});group.state.content_size={30,100};
+    view.widgets[3].spec.parent="group";view.widgets[3].state.bounds={110,60,8,8};
+    view.widgets.insert(view.widgets.begin(),group);validate_snapshot(view);
+    Event pointer=WidgetEvent{{"image",1},PointerInput{PointerKind::click,{111,11}}};
+    const ScrollLookup scrolled=[](const WidgetKey&){return Point{0,50};};
+    check(!normalize_event(view,pointer)&&normalize_event(view,pointer,scrolled),
+          "Shared input normalization did not apply retained group scrolling");
+    view.widgets[0].state.enabled=false;
+    check(!normalize_event(view,pointer,scrolled),"Authoritative ancestor disablement was bypassed");
+}
 }
 int main() {
     try {text_contract();geometry_contract();events_and_identity();retention_and_bitmap();
-        synchronous_text_acknowledgement();group_scroll_contract();bitmap_callback_lifetime();
+        synchronous_text_acknowledgement();group_scroll_contract();bitmap_callback_lifetime();shared_event_normalization();
         std::cout<<"Widget contract checks passed\n";
     } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

@@ -7,19 +7,20 @@ requires additional integration checks on the actual supported platforms.
 
 | Surface | Checks | Location |
 | --- | --- | --- |
-| Abstract adapter | Application uses `Adapter&`; public commands/queries, text metric values and guards, group interior clips, bitmap named actions, unknown enum rejection | [adapter tests](../tests/adapter_test.cpp) |
+| Abstract adapter | Application uses `Adapter&`; all 15 commands/queries, text metric values and guards, group interior clips, bitmap named action choosers with retained/current eligibility, unknown enum rejection | [adapter tests](../tests/adapter_test.cpp) |
 | Encoding and editing | Valid and invalid UTF-8, no zero bytes, byte limits, single/multiline behavior, reversed selection, caret boundaries, unchanged/rejected replacement | [contract tests](../tests/contract_test.cpp) |
 | Declarations and lifetime | Atomic rejection, duplicate IDs, immutable declarations, removal/recreation, stale generation, UI thread affinity, permanent close | [contract tests](../tests/contract_test.cpp) |
-| Input and dropdowns | Silent presentation, stable displayed popup IDs across reorder, removed option rejection, stale text base, wrong-kind and unavailable input, submit consumption | [contract tests](../tests/contract_test.cpp) |
+| Input and dropdowns | Shared public normalization, silent presentation, stable displayed popup IDs across reorder, removed option rejection, stale text base, wrong-kind and unavailable input, submit consumption | [contract tests](../tests/contract_test.cpp) |
 | Retained controls | Caret preservation/clamping, active-page focus, list navigation, disabled rows, scroll history, follow-tail | [contract tests](../tests/contract_test.cpp) |
 | Group composition | Nested scroll transforms, translated hit testing, focus/popup pruning, resolved bounds, fractional bitmap grids, transactional failure | [contract tests](../tests/contract_test.cpp) |
 | Basic geometry | Half-open edges, shared endpoint snapping, bounded scale, pixel mapping, weighted allocation | [contract tests](../tests/contract_test.cpp) |
-| Measured layout | Row/column composition, fixed/auto extents, zero allocation, padding/gaps, clipping, nested equal heights, invalid measurements | [layout tests](../tests/layout_test.cpp) |
+| Measured layout | Shared row allocator, tiny weights, invalid axes, fixed/auto extents, zero allocation, padding/gaps, clipping, nested equal heights, invalid measurements, fractional endpoint/padding and negative-origin regressions | [layout tests](../tests/layout_test.cpp) |
 | Pixel storage | Padded stride, minimum readable bytes, empty blocks, overflow, invalid format, packed bit order, format conversion, overlapping copies | [bitmap tests](../tests/bitmap_test.cpp) |
-| Bitmap production | Damage containment, borrowed storage copy, deterministic retained images, full and partial requests, requested format, omitted output clearing | [bitmap tests](../tests/bitmap_test.cpp) |
+| Bitmap production | Damage containment, borrowed storage copy, producer survives sink release of its last source handle, deterministic retained images, full and partial requests, requested format, omitted output clearing | [bitmap tests](../tests/bitmap_test.cpp) |
 | Bitmap caching | Source identity, revision equality, resizing, partial invalidation, clean repaint, exception rollback/retry, paint reentrancy | [bitmap tests](../tests/bitmap_test.cpp) |
 | Services | Serial dispatch, owned payloads, stable request IDs, duplicate/stale replies, cancellation versus error, text validation, permanent closure | [runtime tests](../tests/runtime_test.cpp) |
-| UI queue | Multiple producers, capacity, bounded drain, owner-thread enforcement, reentrancy, exceptions, shutdown and resource release | [runtime tests](../tests/runtime_test.cpp) |
+| UI queue | Simultaneous producers/drain, per-producer FIFO, capacity/retry, bounded drain, owner-thread enforcement, reentrancy, exceptions, cross-thread shutdown during execution and resource release | [runtime tests](../tests/runtime_test.cpp) |
+| Shared application recovery | Reject delayed/invalid input against authoritative state; retry failed measurements/presentation, retain completed service replies, smaller-resize recovery, list-capacity recovery, close during persistent failure | [application tests](../tests/application_test.cpp) |
 | End-to-end example | Separate shared application compilation, abstract injection, generic metrics/layout, all core kinds, pages, bitmap actions, host replies, queued UI update, teardown | [shared application](../examples/application.hpp), [runner](../examples/demo.cpp) |
 
 Configure and run all checks using the commands in the [README](../README.md).

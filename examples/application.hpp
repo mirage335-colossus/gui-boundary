@@ -25,6 +25,7 @@ public:
         menu.state.options={{"clear","Clear rows","",true}};
         auto& list=add("list",gui::Kind::list,{},"panel");
         list.spec.follow_tail=true;list.state.placeholder="No rows";
+        list.state.content_size.width=360;
         auto& bitmap=add("bitmap",gui::Kind::bitmap,{440,48,160,160});
         bitmap.spec.pointer_input=true;bitmap.state.accessible_name="Color rectangle";
         bitmap.state.actions={{"refresh","Refresh image","",true}};
@@ -45,21 +46,35 @@ public:
         if(adapter_.focus(gui::WidgetKey{"editor",1}))
             adapter_.text_selection({"editor",1},{0,get("editor").state.text.size()});
     }
-    void set_caption(std::string text) {get("caption").state.text=std::move(text);publish();}
-    void handle(const gui::Event& event) {
+    bool show_bitmap_actions() {return adapter_.open_popup(get("bitmap").spec.key);}
+    bool presentation_pending() const {return presentation_pending_;}
+    void retry_presentation() {if(presentation_pending_&&!adapter_.closed())publish();}
+    void set_caption(std::string text) {
+        if(!gui::valid_utf8(text))throw std::invalid_argument("Invalid caption text");
         if(adapter_.closed())return;
+        get("caption").state.text=std::move(text);publish();
+    }
+    void handle(gui::Event event) {
+        if(adapter_.closed())return;
+        // Closing must make progress even when measurement or painting fails.
+        if(std::holds_alternative<gui::CloseEvent>(event)) {
+            services_.shutdown();presentation_pending_=false;adapter_.close();return;
+        }
+        if(!std::holds_alternative<gui::ResizeEvent>(event))retry_presentation();
+        // Reuse the same input policy against authoritative state. This also
+        // protects delivery through a queued facade after the view changes.
+        if(!gui::normalize_event(view_,event,[&](const gui::WidgetKey& key) {
+            return adapter_.scroll_offset(key);
+        }))return;
         if(const auto* e=std::get_if<gui::WidgetEvent>(&event)) {
-            const auto* current=gui::find_widget(view_,e->target);
             const auto available=adapter_.resolved_availability(e->target);
-            if(!current||!available.enabled||!available.visible)return;
             auto& w=get(e->target.id);
             std::visit([&](const auto& input) {
                 using T=std::decay_t<decltype(input)>;
                 if constexpr(std::is_same_v<T,gui::SetChecked>)w.state.checked=input.value;
-                else if constexpr(std::is_same_v<T,gui::EditText>) {
-                    if(input.base_text==w.state.text)w.state.text=input.value;
-                } else if constexpr(std::is_same_v<T,gui::ChooseOption>) {
-                    for(const auto& option:w.state.options)if(option.id==input.id&&option.enabled) {
+                else if constexpr(std::is_same_v<T,gui::EditText>)w.state.text=input.value;
+                else if constexpr(std::is_same_v<T,gui::ChooseOption>) {
+                    for(const auto& option:w.state.options)if(option.id==input.id) {
                         if(w.spec.kind==gui::Kind::text)w.state.text=option.value;
                         else if(w.spec.kind==gui::Kind::choice)w.state.selected=option.id;
                         else if(w.spec.kind==gui::Kind::menu)get("list").state.records.clear();
@@ -80,12 +95,10 @@ public:
             },e->input);
             publish();
         } else if(const auto* page=std::get_if<gui::PageEvent>(&event)) {
-            for(const auto& current:view_.pages)if(current.id==page->id&&current.visible&&current.enabled) {
-                view_.active_page=current.id;publish();break;
-            }
+            view_.active_page=page->id;publish();
         } else if(const auto* resize=std::get_if<gui::ResizeEvent>(&event)) {
             view_.client_size=resize->client_size;view_.display_scale=resize->display_scale;publish();
-        } else if(std::holds_alternative<gui::CloseEvent>(event)) {services_.shutdown();adapter_.close();}
+        }
     }
 private:
     gui::Snapshot view_;
@@ -93,21 +106,31 @@ private:
     gui::ServiceQueue services_;
     unsigned next_row_=1;
     std::uint64_t next_service_=1;
+    bool presentation_pending_=false;
     gui::Widget& add(std::string id,gui::Kind kind,gui::Rect rect,std::string parent={}) {
         gui::Widget w;w.spec.key.id=id;w.spec.binding=id;w.spec.kind=kind;w.spec.parent=std::move(parent);
         w.spec.page="main";w.state.bounds=rect;w.state.label=id;
         view_.widgets.push_back(std::move(w));return view_.widgets.back();
     }
-    gui::Widget& get(const std::string& id) {
-        for(auto& w:view_.widgets)if(w.spec.key.id==id)return w;
+    static gui::Widget& lookup(gui::Snapshot& view,std::string_view id) {
+        for(auto& w:view.widgets)if(w.spec.key.id==id)return w;
         throw std::out_of_range("Unknown widget");
     }
+    gui::Widget& get(std::string_view id) {return lookup(view_,id);}
     void add_row() {
+        auto& list=get("list");
+        if(double(list.state.records.size()+1)*list.spec.row_height>gui::coordinate_limit)
+            throw std::length_error("Example list reached the supported content height");
         gui::Record row;row.id=std::to_string(next_row_++);row.accessible_text=get("editor").state.text;
         row.cells.push_back({row.accessible_text,{4,0,352,28},{}});row.activatable=true;
-        get("list").state.records.push_back(std::move(row));
+        list.state.records.push_back(std::move(row));
     }
     void publish() {
+        // Values and accepted service replies remain authoritative on failure.
+        // Stage layout separately and retain repaint debt for the host's next
+        // tick/error recovery. A smaller resize can replace a failed large one.
+        presentation_pending_=true;
+        auto next=view_;
         gui::LayoutNode panel;panel.id="panel";panel.kind=gui::LayoutKind::column;
         panel.padding={8,8,8,8};panel.gap=8;
         for(const auto* id:{"heading","choice","editor","toggle","button","menu","list"}) {
@@ -115,19 +138,20 @@ private:
             if(child.id!="heading")child.height=child.id=="list"?112:28;
             panel.children.push_back(std::move(child));
         }
-        const auto width=std::min(384.0,std::max(0.0,view_.client_size.width-32));
-        const auto height=std::max(0.0,view_.client_size.height-32);
+        const auto width=std::min(384.0,std::max(0.0,next.client_size.width-32));
+        const auto height=std::max(0.0,next.client_size.height-32);
         const auto layout=gui::compose_layout(panel,{16,16,width,height},[&](std::string_view id,double available) {
-            const auto& w=get(std::string(id));
+            const auto& w=lookup(next,id);
             if(w.spec.kind!=gui::Kind::label)return gui::Size{available,0};
-            return adapter_.measure_text({w.state.text,w.state.font,available,view_.display_scale,w.state.wrap});
+            return adapter_.measure_text({w.state.text,w.state.font,available,next.display_scale,w.state.wrap});
         });
-        for(const auto& box:gui::flatten_layout(layout))get(box.id).state.bounds=box.bounds;
-        auto& group=get("panel").state;
+        for(const auto& box:gui::flatten_layout(layout))lookup(next,box.id).state.bounds=box.bounds;
+        auto& group=lookup(next,"panel").state;
         group.content_size={layout.content.width,layout.content.height};
         group.bounds.height=std::min(height,layout.bounds.height);
         group.content_clip=gui::Rect{8,8,std::max(0.0,group.bounds.width-16),std::max(0.0,group.bounds.height-16)};
-        get("button").state.enabled=get("toggle").state.checked;
-        ++view_.revision;adapter_.present(view_);
+        lookup(next,"button").state.enabled=lookup(next,"toggle").state.checked;
+        ++next.revision;adapter_.present(next);
+        view_=std::move(next);presentation_pending_=false;
     }
 };
