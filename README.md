@@ -19,10 +19,16 @@ The package includes:
   accessibility, dependency rules, and extension guidance.
 - [Conformance coverage](docs/conformance.md): executable checks and the checks
   required when adding a native adapter.
-- [Runnable example](examples/demo.cpp) and [public headers](include/gui).
+- [Boundary audit](docs/audit.md): corrected gaps, edit ownership, duplication
+  assessment, verification results, and remaining capability limits.
+- [Shared application example](examples/application.hpp), [display-free runner](examples/demo.cpp),
+  and [public headers](include/gui).
 
-`MemoryAdapter` is a complete display-free reference for the operations it
-exposes. It retains widget state, validates and routes simulated input, maintains
+`MemoryAdapter` is a display-free reference for the core widget operations.
+The shared example receives only `Adapter&`; the runner supplies the concrete
+implementation and simulated input. Text measurement requires an explicitly
+supplied metrics provider because a display-free object cannot supply native
+glyph metrics. It retains widget state, validates and routes simulated input, maintains
 focus and scrolling, and renders CPU bitmap storage. A native adapter must supply
 actual windows, controls, glyph drawing, native input, accessibility integration,
 and platform service execution. The reference does not open a window.
@@ -47,7 +53,8 @@ directory. The example prints its final control values and bitmap dimensions.
 
 1. Link the `gui_boundary` interface target, or add `include` to the include path.
 2. Declare stable widget keys and create an owned `gui::Snapshot`.
-3. Compute layout in logical client units and publish the snapshot through
+3. Request native text metrics through `Adapter::measure_text`, compute layout
+   in logical client units, and publish the snapshot through
    `gui::Adapter::present`.
 4. Handle `gui::Event` in shared application code, update authoritative values,
    and publish the next snapshot.
@@ -61,3 +68,17 @@ The public types intentionally describe GUI input and output. Adding another
 button, option, text field, list, or bitmap source requires declarations and
 shared application handling; the native adapter continues to interpret the same
 generic vocabulary.
+
+## Scope of completeness
+
+The core covers the declared nine widget kinds, retained control commands and
+queries, measured composition, named bitmap actions, pixel transfer, events,
+and service queues. The public `Adapter` surface contains the application-facing
+operations; native callback probes and CPU image inspection remain on the
+reference implementation. It is a reusable core specification, not an inventory
+of every control or host capability a future application could require.
+Additional primitives or service kinds require a documented contract extension.
+
+Native adapters still have to implement and verify actual controls, glyphs,
+keyboard/accessibility behavior, service execution, and event-loop progress.
+This package neither supplies nor certifies a production native backend.

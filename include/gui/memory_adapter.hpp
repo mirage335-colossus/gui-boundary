@@ -15,8 +15,8 @@ enum class ListKey { up,down,space,enter };
 // adapter. Adapter mutation and event dispatch during paint are rejected.
 class MemoryAdapter final : public Adapter {
 public:
-    explicit MemoryAdapter(EventSink sink={},std::size_t bitmap_budget=64*1024*1024)
-        : owner_(std::this_thread::get_id()),sink_(std::move(sink)),bitmap_budget_(bitmap_budget) {}
+    explicit MemoryAdapter(EventSink sink={},std::size_t bitmap_budget=64*1024*1024,TextMeasure measure={})
+        : owner_(std::this_thread::get_id()),sink_(std::move(sink)),bitmap_budget_(bitmap_budget),measure_(std::move(measure)) {}
     MemoryAdapter(const MemoryAdapter&)=delete;
     MemoryAdapter& operator=(const MemoryAdapter&)=delete;
 
@@ -69,10 +69,19 @@ public:
         generations_=std::move(generations);focus_=std::move(focus);
     }
     const Snapshot& snapshot() const {require_thread();return snapshot_;}
-    Availability resolved_availability(const WidgetKey& key) const {
+    Size measure_text(const TextMeasureRequest& request) const override {
+        require_open();validate_measure_request(request);
+        if(!measure_)throw std::logic_error("Text measurement requires a supplied metrics provider");
+        if(measuring_)throw std::logic_error("Recursive text measurement");
+        struct Guard {bool& flag;explicit Guard(bool& f):flag(f){flag=true;}~Guard(){flag=false;}} guard(measuring_);
+        const auto size=measure_(request);
+        if(!valid_rect({0,0,size.width,size.height}))throw std::invalid_argument("Invalid text measurement result");
+        return size;
+    }
+    Availability resolved_availability(const WidgetKey& key) const override {
         require_open();return resolve_availability(snapshot_,entries_,key);
     }
-    std::optional<WidgetKey> focused() const {require_thread();return focus_;}
+    std::optional<WidgetKey> focused() const override {require_thread();return focus_;}
     bool focus(std::optional<WidgetKey> target) override {
         require_mutable();
         if(target) {
@@ -81,7 +90,7 @@ public:
         }
         focus_=std::move(target);return true;
     }
-    bool focus_next(bool reverse=false) {
+    bool focus_next(bool reverse=false) override {
         require_mutable();std::vector<WidgetKey> eligible;
         for(const auto& w:snapshot_.widgets) {
             const auto a=resolve_availability(snapshot_,entries_,w.spec.key);
@@ -112,11 +121,11 @@ public:
             entries_=std::move(entries);focus_=std::move(focus);
         } else entry.offset=offset;
     }
-    Point scroll_offset(const WidgetKey& key) const {require_open();return at(key).offset;}
-    TextSelection text_selection(const WidgetKey& key) const {
+    Point scroll_offset(const WidgetKey& key) const override {require_open();return at(key).offset;}
+    TextSelection text_selection(const WidgetKey& key) const override {
         require_open();require_kind(key,Kind::text);return at(key).selection;
     }
-    void text_selection(const WidgetKey& key,TextSelection selection) {
+    void text_selection(const WidgetKey& key,TextSelection selection) override {
         require_mutable();require_kind(key,Kind::text);
         at(key).selection=selection.clamped(find_widget(snapshot_,key)->state.text);
     }
@@ -138,7 +147,7 @@ public:
         if(!w||w->spec.kind!=Kind::text||!is_submit(w->spec.text_policy,control,shift))return false;
         send(WidgetEvent{key,SubmitText{}});return true;
     }
-    bool open_popup(const WidgetKey& key) {
+    bool open_popup(const WidgetKey& key) override {
         require_mutable();const auto* w=find_widget(snapshot_,key);const auto a=resolve_availability(snapshot_,entries_,key);
         if(!w||!a.enabled||!a.visible||w->state.options.empty()||
            (w->spec.kind!=Kind::choice&&w->spec.kind!=Kind::menu&&w->spec.kind!=Kind::text)||
@@ -152,9 +161,11 @@ public:
         if(index>=displayed.size()||!displayed[index].enabled)return Delivery::ignored;
         return send(WidgetEvent{key,ChooseOption{displayed[index].id}});
     }
-    void close_popup(const WidgetKey& key) {require_mutable();at(key).popup.reset();}
+    void close_popup(const WidgetKey& key) override {require_mutable();at(key).popup.reset();}
     Delivery list_key(const WidgetKey& key,ListKey input) {
         require_mutable();require_kind(key,Kind::list);const auto* w=find_widget(snapshot_,key);
+        switch(input) {case ListKey::up:case ListKey::down:case ListKey::space:case ListKey::enter:break;
+            default:return Delivery::ignored;}
         const auto a=resolve_availability(snapshot_,entries_,key);if(!a.enabled||!a.visible)return Delivery::ignored;
         const auto& rows=w->state.records;
         const auto found=std::find_if(rows.begin(),rows.end(),[&](const auto& r){return w->state.selected==r.id;});
@@ -195,7 +206,7 @@ public:
         struct Guard {bool& flag;explicit Guard(bool& f):flag(f){flag=true;}~Guard(){flag=false;}} guard(dispatching_);
         auto callback=sink_;callback(event);return Delivery::delivered;
     }
-    void invalidate(const WidgetKey& key,PixelRect damage) {
+    void invalidate(const WidgetKey& key,PixelRect damage) override {
         require_mutable();require_kind(key,Kind::bitmap);at(key).bitmap.invalidate(damage);
     }
     bool repaint(const WidgetKey& key) {
@@ -207,7 +218,7 @@ public:
     const BitmapImage& image(const WidgetKey& key) const {
         require_open();require_kind(key,Kind::bitmap);return at(key).bitmap.image();
     }
-    bool closed() const {require_thread();return closed_;}
+    bool closed() const override {require_thread();return closed_;}
     void close() override {
         require_thread();require_not_painting();closed_=true;sink_={};focus_.reset();entries_.clear();snapshot_={};
     }
@@ -222,11 +233,13 @@ private:
     std::thread::id owner_;
     EventSink sink_;
     std::size_t bitmap_budget_;
+    TextMeasure measure_;
     Snapshot snapshot_;
     std::map<std::string,Entry,std::less<>> entries_;
     std::map<std::string,std::uint64_t,std::less<>> generations_;
     std::optional<WidgetKey> focus_;
     bool closed_=false,dispatching_=false,painting_=false;
+    mutable bool measuring_=false;
     static Availability resolve_availability(const Snapshot& view,
             const std::map<std::string,Entry,std::less<>>& entries,const WidgetKey& key) {
         return availability(view,key,[&](const WidgetKey& group) {
@@ -272,6 +285,7 @@ private:
     void require_open() const {require_thread();if(closed_)throw std::logic_error("Adapter is closed");}
     void require_not_painting() const {
         if(painting_)throw std::logic_error("Adapter mutation during bitmap paint");
+        if(measuring_)throw std::logic_error("Adapter mutation during text measurement");
     }
     void require_mutable() const {require_open();require_not_painting();}
     Entry& at(const WidgetKey& key) {
@@ -289,10 +303,12 @@ private:
         if(!w||w->spec.kind!=kind)throw std::invalid_argument("Unexpected widget kind");
     }
     static Point scroll_maximum(const Widget& w) {
+        auto viewport=Rect{0,0,w.state.bounds.width,w.state.bounds.height};
+        if(w.spec.kind==Kind::group&&w.state.content_clip)viewport=intersect(viewport,*w.state.content_clip);
         const auto height=std::max(w.state.content_size.height,w.spec.kind==Kind::list?
             double(w.state.records.size())*w.spec.row_height:0.0);
-        return {std::max(0.0,w.state.content_size.width-w.state.bounds.width),
-                std::max(0.0,height-w.state.bounds.height)};
+        return {std::max(0.0,w.state.content_size.width-viewport.width),
+                std::max(0.0,height-viewport.height)};
     }
     void reveal_record(const WidgetKey& key,std::size_t index) {
         const auto* w=find_widget(snapshot_,key);auto offset=at(key).offset;
@@ -329,9 +345,17 @@ private:
                 return false;
             } else if constexpr(std::is_same_v<T,SubmitText>)return kind==Kind::text&&
                 !w->spec.text_policy.read_only&&w->spec.text_policy.submit!=SubmitKey::none;
-            else return w->spec.pointer_input&&contains(a.clip,input.position)&&
-                std::isfinite(input.wheel_x)&&std::isfinite(input.wheel_y)&&
-                (input.kind!=PointerKind::wheel||input.wheel_x!=0||input.wheel_y!=0);
+            else if constexpr(std::is_same_v<T,InvokeAction>) {
+                if(kind!=Kind::bitmap)return false;
+                for(const auto& action:w->state.actions)if(action.id==input.id)return action.enabled;
+                return false;
+            } else {
+                switch(input.kind) {case PointerKind::click:case PointerKind::double_click:case PointerKind::move:case PointerKind::wheel:break;
+                    default:return false;}
+                return w->spec.pointer_input&&contains(a.clip,input.position)&&
+                    std::isfinite(input.wheel_x)&&std::isfinite(input.wheel_y)&&
+                    (input.kind!=PointerKind::wheel||input.wheel_x!=0||input.wheel_y!=0);
+            }
         },event.input);
     }
 };

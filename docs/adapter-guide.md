@@ -27,6 +27,27 @@ desktop executable. A different executable may use `MemoryAdapter` for automated
 checks. Adapter selection belongs in build configuration or the composition root.
 The shared application must not branch on the selected toolkit.
 
+The generic retained-state and input rules already execute in `MemoryAdapter`.
+A native adapter can contain it as a policy engine, delegate the public commands
+and native input probes, and add native object, drawing, measurement, and host
+operations around it. This reuses generation checks, availability, text
+validation, popup identity, list navigation, selection, scrolling, bitmap
+storage, and event acceptance. Native presentation must still stage its own
+resources before committing visible changes and preserve the transactional
+contract if either preparation fails. Mechanical forwarding does not grant
+permission to create a second copy of those decisions in each backend.
+
+A production implementation may factor the same facilities into smaller shared
+components for performance. Preserve the same conformance tests and a single
+authoritative implementation of each rule when doing so. No native adapter is
+provided here, so this document describes how to avoid duplicated policy; it
+does not claim that separately written backends already reuse it.
+
+The [shared example](../examples/application.hpp) accepts an `Adapter&`;
+[its runner](../examples/demo.cpp) alone constructs `MemoryAdapter`, injects
+fixture metrics, and generates simulated input. The shared application compiles
+as a separate translation unit with only public boundary headers.
+
 The composition root creates the UI runtime, application, and adapter, connects
 the event sink, performs the first layout, and publishes the first snapshot.
 The adapter must not receive an application implementation object exposing
@@ -46,7 +67,10 @@ Follow this sequence for every presentation:
    retained declaration. It prepares the update before changing visible objects.
 5. The adapter removes missing native objects, creates new objects by `Kind`,
    and silently updates surviving objects. Newly created callbacks capture a
-   lifetime-safe adapter reference and the exact widget key.
+   lifetime-safe adapter reference, exact widget key, and native-object instance
+   token. A child can keep its key while a replaced parent forces native child
+   reconstruction; the instance token must reject callbacks from that old
+   native object even though the shared key still survives.
 6. It restores valid focus, caret, selection, and scroll positions. It closes
    popups whose target became unavailable. It keeps a surviving open popup's
    displayed option snapshot until that popup returns.
@@ -135,6 +159,16 @@ that policy once for all adapters. Pointer recognition should use native
 accessibility and multi-click settings where possible and consistent shared
 semantics for the emitted events.
 
+### Bitmap keyboard and accessibility actions
+
+Read the current bitmap's ordered `actions` values. Expose enabled actions to
+assistive technology and a standard keyboard-accessible action chooser. Retain
+displayed IDs for an open chooser; resolve a native index against that snapshot
+and recheck current eligibility before sending `InvokeAction{id}`. Action
+meaning remains in shared handling, which can call the same operation used by
+pointer input. The adapter never synthesizes application coordinates to emulate
+a keyboard action.
+
 ## 4. Bitmap call path
 
 ```text
@@ -172,10 +206,11 @@ scrollable views. A separate native feature renderer is unnecessary when the
 existing primitives can express the view. `compose_layout` supplies a generic
 measured composition helper; its output can be flattened into widget bounds.
 
-The native text measurement callback receives a leaf identity and available
-logical width. Shared presentation uses the identity to provide literal text,
-font, wrapping, and spacing policy. The callback returns finite logical extents
-computed with the same native font configuration used for drawing. It must not
+The shared `LayoutMeasure` callback receives a leaf identity and available
+logical width. It resolves that identity in shared presentation and constructs
+a `TextMeasureRequest` for `Adapter::measure_text`. The native adapter receives
+literal text, font, wrapping, width, and intended display scale, and returns
+finite logical extents using the same native glyph configuration as drawing. It must not
 change application state, open dialogs, or dispatch input.
 
 Measure again when text, font, wrap width, native font fallback, or scale-dependent
@@ -184,9 +219,10 @@ available viewport. Shared layout owns padding, gaps, fixed/automatic extents,
 relative weights, and equal-height allocation. Native code applies the resulting
 geometry and measures glyphs.
 
-Containers must clip their content consistently for drawing and input. A native
-implementation can insert an inner group for a layout box's content rectangle
-when padding must also constrain descendant input. `WidgetState::bounds` defines
+Containers must clip their content consistently for drawing and input. The shared application sets
+each group's `content_clip` from the layout box's interior rectangle in local
+coordinates. The native implementation applies that retained clip to children
+for drawing and hit testing, including after nested scrolling. `WidgetState::bounds` defines
 the actual interactive area; the shared application should not declare an
 interactive target larger than its intended content clip.
 

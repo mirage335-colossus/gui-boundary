@@ -70,8 +70,12 @@ It must handle a zero-width request explicitly.
 Both returned extents must be finite, nonnegative, and no greater than `coordinate_limit`.
 Returned height controls automatic height; returned width is validated but does not change the allocated width.
 
-The adapter should measure the leaf's current text with the same native font, size, weight, wrapping, and line spacing used to draw it.
-Its lookup from leaf ID to text and font must use the same presentation revision throughout a composition call.
+The shared callback resolves the leaf ID using its own current presentation.
+It calls `Adapter::measure_text` with a `TextMeasureRequest` containing owned
+literal text, font, wrapping, width, and the intended display scale.
+The adapter receives those generic values without any private application lookup.
+The callback must use the same presentation revision throughout a composition call.
+The native adapter measures with the same glyph configuration used to draw.
 Use native glyph measurement and line wrapping; character counts are not an adequate replacement for text metrics.
 Include whatever line-height or baseline allowance the native text API requires in the returned height.
 Do not add node padding inside the measurement result because composition already adds it.
@@ -95,9 +99,19 @@ An empty clip means that the node has no visible area, even when its outer bound
 Flatten the result, match each ID to its declared widget, and assign each record's `bounds` to `WidgetState::bounds`.
 This assignment supplies geometry only; preserve the widget's existing value, label, availability, and identity generation.
 Retain the hierarchy's parent relations when constructing a snapshot.
-The snapshot contract has no independent per-widget clip field: exact interior clipping also requires matching native clips or group widgets whose frames represent container interiors.
-An adapter must consume `LayoutBox::clip` where needed, or introduce interior clipping groups while retaining outer decoration separately.
-Do not assume that copying outer rectangles alone reproduces clipping at a padded container's interior edge.
+For every container represented by a group, set `WidgetState::content_clip` to
+`Rect{box.content.x - box.bounds.x, box.content.y - box.bounds.y,
+box.content.width, box.content.height}`. Retain the corresponding group parents.
+The snapshot then carries the interior clipping rule through the public boundary;
+the adapter needs no separate layout-tree channel. For an outer viewport shorter
+than the measured document, supply a separate viewport group or constrain the
+group frame and its content clip while retaining the measured content extent.
+For a padded layout group, publish `box.content.width` and `box.content.height`
+as its `content_size`. This extent starts at the interior origin and excludes
+padding; maximum scrolling subtracts the actual child viewport extent.
+A manually built tree with additional clipping must likewise express that
+clipping through its group hierarchy. Copying only outer leaf bounds does not
+reproduce padded-container clipping.
 Apply group scrolling and logical-to-device conversion after composition, using the shared coordinate contract.
 For a scrollable document, compose an automatic-height root and use that returned outer height as the content extent beneath a separate viewport group.
 

@@ -24,6 +24,32 @@ struct Font {
     double size=14;bool bold=false;Tone tone=Tone::normal;
     bool operator==(const Font&) const = default;
 };
+enum class TextWrap { none,word };
+struct TextMeasureRequest {
+    std::string text;
+    Font font;
+    double available_width=0,display_scale=1;
+    TextWrap wrap=TextWrap::none;
+};
+using TextMeasure=std::function<Size(const TextMeasureRequest&)>;
+inline void validate_font(const Font& font) {
+    if(!std::isfinite(font.size)||font.size<=0||font.size>1024)
+        throw std::invalid_argument("Invalid font size");
+    switch(font.tone) {
+        case Tone::normal:case Tone::muted:case Tone::accent:case Tone::error:return;
+    }
+    throw std::invalid_argument("Unknown text tone");
+}
+inline void validate_wrap(TextWrap wrap) {
+    switch(wrap) {case TextWrap::none:case TextWrap::word:return;}
+    throw std::invalid_argument("Unknown text wrapping policy");
+}
+inline void validate_measure_request(const TextMeasureRequest& request) {
+    validate_font(request.font);validate_wrap(request.wrap);
+    if(!valid_utf8(request.text)||!valid_rect({0,0,request.available_width,0}))
+        throw std::invalid_argument("Invalid text measurement request");
+    (void)device_rect({0,0,0,0},request.display_scale);
+}
 struct Option {
     std::string id,label,value;
     bool enabled=true;
@@ -33,6 +59,7 @@ struct Cell {
     std::string text;
     Rect bounds;
     Font font;
+    TextWrap wrap=TextWrap::none;
     bool operator==(const Cell&) const = default;
 };
 struct Record {
@@ -57,12 +84,20 @@ struct BitmapView {
 };
 struct WidgetState {
     Rect bounds;
+    // A group's optional child viewport, relative to its own top-left corner.
+    // Its frame remains available; only descendants use this additional clip.
+    std::optional<Rect> content_clip;
     std::string label,text,help,accessible_name,placeholder,display_text;
     Font font;
+    TextWrap wrap=TextWrap::none;
     bool enabled=true,visible=true,checked=false;
     std::optional<std::string> selected;
     std::vector<Option> options;
+    // Named bitmap actions exposed through native keyboard/accessibility UI.
+    std::vector<Option> actions;
     std::vector<Record> records;
+    // Scrollable content extent measured from the child viewport's top-left.
+    // A group's content_clip determines viewport size; padding is not content.
     Size content_size;
     BitmapView bitmap;
 };
@@ -89,6 +124,7 @@ struct ChooseOption {std::string id;};
 struct SelectRecord {std::string id;};
 struct ActivateRecord {std::string id;};
 struct SubmitText {};
+struct InvokeAction {std::string id;};
 enum class PointerKind { click,double_click,move,wheel };
 struct PointerInput {
     PointerKind kind=PointerKind::click;
@@ -96,7 +132,7 @@ struct PointerInput {
     double wheel_x=0,wheel_y=0; // Positive means right/up, in detents.
     bool control=false,shift=false,alt=false;
 };
-using Input=std::variant<Activate,SetChecked,EditText,ChooseOption,SelectRecord,ActivateRecord,SubmitText,PointerInput>;
+using Input=std::variant<Activate,SetChecked,EditText,ChooseOption,SelectRecord,ActivateRecord,SubmitText,InvokeAction,PointerInput>;
 struct WidgetEvent {WidgetKey target;Input input;};
 struct PageEvent {std::string id;};
 struct ResizeEvent {Size client_size;double display_scale=1;};
@@ -117,7 +153,7 @@ using ScrollLookup=std::function<Point(const WidgetKey&)>;
 // offset moves its descendants left/up, including nested groups; its own frame
 // stays fixed. Supplying no lookup resolves the layout at zero scroll.
 inline Availability availability(const Snapshot& view,const WidgetKey& key,const ScrollLookup& scroll={}) {
-    struct Resolved {Availability area;Point children_translation;};
+    struct Resolved {Availability area;Point children_translation;Rect children_clip;};
     std::map<std::string,Resolved,std::less<>> resolved;
     for(const auto& w:view.widgets) {
         Point translation;
@@ -136,10 +172,15 @@ inline Availability availability(const Snapshot& view,const WidgetKey& key,const
             }
         }
         if(parent) {
-            a.clip=intersect(a.clip,parent->area.clip);
+            a.clip=intersect(a.clip,parent->children_clip);
             a.visible=a.visible&&parent->area.visible;a.enabled=a.enabled&&parent->area.enabled;
         }
         a.visible=a.visible&&has_area(a.clip);
+        auto children_clip=a.clip;
+        if(w.state.content_clip) {
+            const auto clip=*w.state.content_clip;
+            children_clip=intersect(children_clip,{bounds.x+clip.x,bounds.y+clip.y,clip.width,clip.height});
+        }
         if(w.spec.kind==Kind::group&&scroll) {
             const auto offset=scroll(w.spec.key);
             if(!std::isfinite(offset.x)||!std::isfinite(offset.y)||offset.x<0||offset.y<0||
@@ -147,19 +188,18 @@ inline Availability availability(const Snapshot& view,const WidgetKey& key,const
                 throw std::invalid_argument("Invalid group scroll offset");
             translation.x-=offset.x;translation.y-=offset.y;
         }
-        resolved.emplace(w.spec.key.id,Resolved{a,translation});
+        resolved.emplace(w.spec.key.id,Resolved{a,translation,children_clip});
         if(w.spec.key==key)return a;
     }
     return {};
 }
 inline bool focusable(const Widget& w) {
     return w.spec.kind!=Kind::group&&w.spec.kind!=Kind::label&&
-        (w.spec.kind!=Kind::bitmap||w.spec.pointer_input);
+        (w.spec.kind!=Kind::bitmap||w.spec.pointer_input||!w.state.actions.empty());
 }
 inline void validate_snapshot(const Snapshot& view) {
     const auto require=[](bool ok,const char* message){if(!ok)throw std::invalid_argument(message);};
     const auto text=[&](const std::string& s){require(valid_utf8(s),"Invalid UTF-8 presentation text");};
-    const auto font=[&](const Font& f){require(std::isfinite(f.size)&&f.size>0&&f.size<=1024,"Invalid font size");};
     require(valid_rect({0,0,view.client_size.width,view.client_size.height}),"Invalid client size");
     device_rect({0,0,view.client_size.width,view.client_size.height},view.display_scale);
     (void)pixel_row_bytes(0,view.bitmap_format);
@@ -173,6 +213,15 @@ inline void validate_snapshot(const Snapshot& view) {
     std::map<std::string,const Widget*,std::less<>> widgets;
     for(const auto& w:view.widgets) {
         const auto& s=w.spec;const auto& v=w.state;
+        switch(s.kind) {
+            case Kind::group:case Kind::label:case Kind::button:case Kind::toggle:case Kind::choice:
+            case Kind::text:case Kind::list:case Kind::bitmap:case Kind::menu:break;
+            default:throw std::invalid_argument("Unknown widget kind");
+        }
+        switch(s.text_policy.submit) {
+            case SubmitKey::none:case SubmitKey::enter:case SubmitKey::control_enter:break;
+            default:throw std::invalid_argument("Unknown text submission policy");
+        }
         text(s.key.id);text(s.page);text(s.parent);text(s.binding);
         require(!s.key.id.empty()&&s.key.generation!=0&&widgets.emplace(s.key.id,&w).second,"Invalid or duplicate widget key");
         require(s.page.empty()||pages.contains(s.page),"Unknown widget page");
@@ -182,11 +231,13 @@ inline void validate_snapshot(const Snapshot& view) {
             require(found->second->spec.page==s.page,"Child and parent must use the same page");
         }
         require(valid_rect(v.bounds)&&valid_rect({0,0,v.content_size.width,v.content_size.height}),"Invalid widget geometry");
-        font(v.font);
+        validate_font(v.font);validate_wrap(v.wrap);
+        if(v.content_clip)require(s.kind==Kind::group&&valid_rect(*v.content_clip),"Invalid group content clip");
         for(const auto* value:{&v.label,&v.text,&v.help,&v.accessible_name,&v.placeholder,&v.display_text})text(*value);
         require(std::isfinite(s.row_height)&&s.row_height>0&&s.row_height<=coordinate_limit,"Invalid row height");
         if(s.kind==Kind::text)require(text_error(v.text,s.text_policy).empty(),"Invalid editor state");
         require(v.options.empty()||s.kind==Kind::choice||s.kind==Kind::menu||s.kind==Kind::text,"Options on unsupported widget");
+        require(v.actions.empty()||s.kind==Kind::bitmap,"Actions on unsupported widget");
         require(v.records.empty()||s.kind==Kind::list,"Records on unsupported widget");
         require(!v.selected||s.kind==Kind::list||s.kind==Kind::choice,"Selection on unsupported widget");
         if(v.selected){text(*v.selected);require(!v.selected->empty(),"Empty selected ID");}
@@ -197,12 +248,18 @@ inline void validate_snapshot(const Snapshot& view) {
             if(s.kind==Kind::text)require(text_error(option.value,s.text_policy).empty(),"Invalid suggested text");
         }
         ids.clear();
+        for(const auto& action:v.actions) {
+            text(action.id);text(action.label);
+            require(!action.id.empty()&&!action.label.empty()&&action.value.empty()&&ids.insert(action.id).second,
+                    "Action IDs and labels must be nonempty, IDs unique, and values empty");
+        }
+        ids.clear();
         require(double(v.records.size())*s.row_height<=coordinate_limit,"List is too tall");
         for(const auto& record:v.records) {
             text(record.id);text(record.accessible_text);
             require(!record.id.empty()&&ids.insert(record.id).second,"Record IDs must be nonempty and unique");
             for(const auto& cell:record.cells) {
-                text(cell.text);font(cell.font);require(valid_rect(cell.bounds),"Invalid record cell geometry");
+                text(cell.text);validate_font(cell.font);validate_wrap(cell.wrap);require(valid_rect(cell.bounds),"Invalid record cell geometry");
             }
         }
         text(v.bitmap.source_id);
@@ -214,8 +271,19 @@ class Adapter {
 public:
     virtual ~Adapter()=default;
     virtual void present(Snapshot snapshot)=0;
+    virtual Size measure_text(const TextMeasureRequest& request) const=0;
+    virtual Availability resolved_availability(const WidgetKey& target) const=0;
+    virtual std::optional<WidgetKey> focused() const=0;
     virtual bool focus(std::optional<WidgetKey> target)=0;
+    virtual bool focus_next(bool reverse=false)=0;
     virtual void scroll(const WidgetKey& target,Point offset)=0;
+    virtual Point scroll_offset(const WidgetKey& target) const=0;
+    virtual TextSelection text_selection(const WidgetKey& target) const=0;
+    virtual void text_selection(const WidgetKey& target,TextSelection selection)=0;
+    virtual bool open_popup(const WidgetKey& target)=0;
+    virtual void close_popup(const WidgetKey& target)=0;
+    virtual void invalidate(const WidgetKey& target,PixelRect damage)=0;
+    virtual bool closed() const=0;
     virtual void close()=0;
 };
 }

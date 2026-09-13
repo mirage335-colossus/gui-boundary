@@ -38,14 +38,14 @@ public output is a `BitmapSource` handle.
 
 | Kind | Presentation input | User output | Required native behavior |
 | --- | --- | --- | --- |
-| `group` | Bounds, content extent, visibility, enablement | No direct action | Own children, clip descendants, retain scrolling |
+| `group` | Bounds, optional interior clip, content extent, visibility, enablement | No direct action | Own children, clip descendants, retain scrolling |
 | `label` | Literal text, font, tone, bounds | None | Draw readable native text |
 | `button` | Label, help, availability | `Activate` | Pointer and keyboard activation |
 | `toggle` | Label, checked state, availability | `SetChecked` | Expose a boolean control and its accessible state |
 | `choice` | Ordered options, optional selected ID, placeholder, optional display text | `ChooseOption` | Closed dropdown selection by stable ID |
 | `text` | Text policy, text, optional suggestions, placeholder | `EditText`, `ChooseOption`, `SubmitText` | Native editor, atomic validation, retained caret and selection |
 | `list` | Ordered structured records, optional selected ID, row height, content width | `SelectRecord`, `ActivateRecord` | Stable rows, keyboard navigation, scrolling, empty text |
-| `bitmap` | Opaque source, source ID, revision, bounds | Optional `PointerInput` | Request and display pixels; retain native accessible description |
+| `bitmap` | Opaque source, source ID, revision, bounds, named actions | Optional `PointerInput`, `InvokeAction` | Request and display pixels; retain native accessible description |
 | `menu` | Label and ordered enabled/disabled options | `ChooseOption` | Native action menu with stable item IDs |
 
 `PointerInput` can also be enabled on another kind with `pointer_input`. This is
@@ -101,7 +101,12 @@ requires a fresh adapter lifetime; integer wrap does not authorize reuse.
 `bounds` is the unscrolled rectangle in logical client coordinates. It includes
 the control's allocated area. `label`, `text`, `help`, `accessible_name`,
 `placeholder`, and `display_text` are owned, literal UTF-8 strings without zero
-bytes. `font` supplies logical size, boldness, and a semantic tone. These state
+bytes. `font` supplies logical size, boldness, and a semantic tone. `wrap` is `none`
+or `word`; it supplies the same native wrapping choice to drawing and
+measurement. Native text cells carry their own `wrap`. Explicit line breaks
+remain line breaks in both modes. With `none`, horizontal overflow is clipped;
+with `word`, the native text engine wraps at its normal word boundaries and
+breaks an oversized item as needed. A zero width yields no visible text. These state
 properties, including labels and help, can change without a new generation.
 
 The displayed text fields have explicit roles:
@@ -158,6 +163,7 @@ contain a borrowed toolkit pointer or mutable native item index.
 | `SelectRecord{id}` | Current enabled record in a list |
 | `ActivateRecord{id}` | Current enabled, activatable record; represents selection and activation together |
 | `SubmitText` | Editable text with a declared submission policy |
+| `InvokeAction{id}` | Current enabled named action on an enabled, visible bitmap |
 | `PointerInput` | Explicitly opted-in control; finite position inside its effective clip; finite wheel values |
 | `PageEvent{id}` | Different visible, enabled declared page |
 | `ResizeEvent` | Finite bounded size and positive supported display scale |
@@ -183,6 +189,11 @@ In the reference, a sink can synchronously publish another snapshot or call
 after the dispatch guard resets. Native callbacks must catch exceptions and
 report them through the application's error handling. Destruction of the adapter
 itself must be deferred until a callback returns.
+
+Native object reconstruction needs an adapter-local instance token as well as
+the shared widget key: a surviving child key can acquire a replacement native
+object when its parent changes. Reject callbacks from the retired object even
+when the shared key remains eligible.
 
 Bitmap producer callbacks execute inside a paint guard. All mutating reference
 adapter operations, including `send` and `close`, reject calls during that paint.
@@ -301,7 +312,20 @@ the reference limits coordinates and extents to `coordinate_limit`. Display
 scale is greater than zero and at most 16. Other limits need an explicit revision
 of the boundary contract.
 
-Group bounds are their viewport. `content_size` declares scrollable content.
+Group bounds are their outer viewport. `content_size` declares the scrollable
+content extent measured from the child viewport's top-left; it excludes padding.
+The maximum offset is content extent minus the local child viewport extent,
+clamped to zero. For this calculation, intersect `content_clip` with the local
+group frame only; ancestor and client clipping restrict visibility without
+changing scroll extents. Shrinking content or expanding the local viewport
+clamps retained offsets.
+A group may set `content_clip` to an additional child viewport in coordinates
+relative to its own top-left corner. The adapter intersects that rectangle with
+the group frame and inherited clip. It constrains descendants for drawing and
+input without shrinking the group frame. This child viewport moves with the
+group under ancestor scrolling and remains fixed while the group scrolls its
+own descendants. An absent clip uses the full frame; an empty clip hides every
+descendant. Only groups may declare `content_clip`.
 Children's declared bounds are absolute positions in the unscrolled layout.
 Each ancestor group's retained positive scroll offset translates descendants
 left/up. `availability` can take a `ScrollLookup`; its `bounds` reports the
@@ -326,8 +350,18 @@ removed, or replaced target loses focus. Programmatic focus failure returns
 false and leaves the previous focus unchanged. `focus(nullopt)` clears focus.
 Reference Tab traversal follows declaration order, skips unavailable targets,
 and wraps; reverse traversal follows the opposite order. Groups and labels do
-not enter Tab order. An interactive bitmap may enter Tab order; native adapters
-must provide accessible keyboard equivalents for its application actions.
+not enter Tab order. A bitmap with pointer input or named actions enters Tab order. Its optional
+`actions` uses ordered `Option` records: nonempty stable IDs and literal labels,
+enabled state, and an empty `value`. Native adapters expose these actions both
+to assistive technology and through a keyboard-accessible action chooser
+(for example, the platform context-menu key). Selection produces
+`InvokeAction{id}` after checking the current action list and widget eligibility.
+A displayed chooser retains its displayed IDs across updates, just like an
+option popup. The application routes keyboard and pointer equivalents to the
+same shared operation. It must declare an action for each available bitmap
+operation requiring a keyboard equivalent; the adapter cannot infer action
+meaning from pointer coordinates. Removing or disabling an action suppresses
+late callbacks. This is an input capability of the existing bitmap kind.
 
 `PointerInput` carries logical client position, normalized click/double-click/
 move/wheel kind, modifier booleans, and wheel detents. Wheel x is positive-right;
@@ -350,26 +384,38 @@ a control's label.
 | `find_widget` | Snapshot, exact key | Borrowed pointer valid while that snapshot stays unchanged, or null |
 | `availability` | Snapshot, key, optional scroll lookup | Resolved bounds, clip, visibility, enablement |
 | `Adapter::present` | Owned snapshot | Create/update/remove retained presentation silently |
+| `Adapter::measure_text` | Owned literal text, font, wrap, available width, display scale | Finite logical text extents; no mutation or input |
+| `Adapter::resolved_availability` | Exact key | Current resolved bounds, clip, visibility, enablement |
+| `Adapter::focused`, `Adapter::closed` | None | Optional focused key or permanent closure state |
 | `Adapter::focus` | Optional exact key | Success boolean; silent retained focus change |
-| `Adapter::scroll` | Exact key, finite offset | Silent clamped scroll change for group/text/list |
+| `Adapter::focus_next` | Reverse flag | Move to next eligible target; success boolean |
+| `Adapter::scroll`, `Adapter::scroll_offset` | Exact key; offset for setter | Silent clamped group/text/list scroll change or current offset |
+| `Adapter::text_selection` getter/setter | Exact text key; selection for setter | Read/write retained clamped editor selection silently |
+| `Adapter::open_popup`, `Adapter::close_popup` | Exact choice/menu/text key | Open available option popup (success boolean) or dismiss silently |
+| `Adapter::invalidate` | Exact bitmap key, pixel damage | Mark retained pixels for repaint without changing content identity |
 | `Adapter::close` | None | Idempotent permanent teardown |
 | `MemoryAdapter::send` | Owned event | `Delivery` after validation and synchronous sink call |
-| `snapshot`, `focused`, `closed` | None | Current reference presentation, optional focus, closure state |
-| `focus_next` | Reverse flag | Move to next eligible target; success boolean |
-| `text_selection` getter/setter | Key; optional selection | Read/write retained clamped editor selection |
-| `replace` | Text key, inserted bytes | Validated selection replacement and delivery result |
-| `enter` | Text key, Control/Shift flags | Whether the declared submission key was consumed |
-| `open_popup` | Choice/menu/text key | Retain displayed options; success boolean |
-| `choose_popup` | Key, displayed index | Close popup, map and validate stable ID, deliver input |
-| `close_popup` | Key | Dismiss retained popup silently |
-| `list_key` | List key, navigation/activation key | Reveal eligible row and deliver semantic input |
-| `scroll_offset`, `resolved_availability` | Key | Current offset or effective geometry |
-| `invalidate`, `repaint`, `image` | Bitmap key; optional pixel damage | Mark damage, render if visible, inspect owned reference image |
+| `MemoryAdapter::snapshot` | None | Borrowed current reference presentation |
+| `MemoryAdapter::replace` | Text key, inserted bytes | Simulated validated selection replacement and delivery result |
+| `MemoryAdapter::enter` | Text key, Control/Shift flags | Whether the declared submission key was consumed |
+| `MemoryAdapter::choose_popup` | Key, displayed index | Simulated native choice; close popup, map stable ID, deliver input |
+| `MemoryAdapter::list_key` | List key, navigation/activation key | Simulated native list input; reveal and deliver eligible row |
+| `MemoryAdapter::repaint`, `MemoryAdapter::image` | Bitmap key | Render visible reference storage or inspect its committed CPU image |
+| `validate_font`, `validate_wrap`, `validate_measure_request` | Generic font, wrap, or metric request | Validate before invoking native text measurement |
 | `valid_utf8`, `text_error`, `replace_text` | Text and declared policy | Validation result or atomic replacement proposal |
 | `text_boundary`, `TextSelection::clamped`, `is_submit` | Encoding offsets or key modifiers | Shared editor boundary decisions |
 | `focusable`, `valid_rect`, `has_area` | Widget or rectangle | Shared eligibility and geometry predicates |
 | `arrange`, `intersect`, `contains`, `device_rect`, `pixel_at` | Logical or pixel geometry | Shared allocation, clipping, snapping, and mapping |
 | `compose_layout`, `flatten_layout` | Layout tree, viewport, measurement callback | Owned measured hierarchy or preorder placements; see the layout contract |
+
+The `Adapter` interface is the production application boundary. The shared
+application receives it by reference and can perform the listed commands without
+naming a native implementation. It owns its own presentation values, so there
+is no requirement to query a concrete adapter's retained snapshot. Native input
+translation and test probes (`send`, `replace`, `enter`, `choose_popup`,
+`list_key`) are implementation entry points. CPU repaint/image inspection is
+also implementation-specific; applications publish sources and invalidate via
+`Adapter`, while the native loop schedules painting.
 
 All adapter methods require the creating UI thread. `send` after closure is
 ignored. `close` remains safe to repeat; snapshot/focus/closure inspection remains
@@ -383,3 +429,28 @@ defaults to 64 MiB of aggregate persistent pixel storage. Temporary copies,
 producer scratch space, native resources, and nonpixel data are additional.
 A production adapter can use precise reconciliation and smaller staged updates
 while preserving the same observable behavior.
+
+## 11. Text measurement through the boundary
+
+`TextMeasureRequest` owns literal UTF-8 `text`, `font`, `available_width`,
+`display_scale`, and `wrap`. No widget ID, native font handle, application object,
+or private lookup crosses this call. The shared layout callback looks up its
+own leaf's presentation, creates this request, and calls `Adapter::measure_text`.
+The returned `Size` is a finite, nonnegative logical extent bounded by
+`coordinate_limit`; it excludes application padding, borders, and scrollbars.
+
+The native adapter must use the font fallback, size, boldness, explicit line
+breaks, and wrapping used by native drawing. The supplied scale is explicit so
+initial layout and a newly received resize can be measured before `present`.
+Measure at zero width without division by zero or unbounded wrapping. The text
+engine may report intrinsic width greater than available width when wrapping
+is disabled; shared layout still clips to its allocated frame.
+
+A measurement call must not mutate presentation, dispatch events, or recurse
+into itself. Errors propagate without a presentation update. `MemoryAdapter`
+accepts a `TextMeasure` provider as its third constructor argument, validates
+requests before calling it and validates returned extents. No provider means
+measurement throws a clear unsupported-operation error. Its guard rejects
+provider mutation or recursive measurement and resets after any exception.
+The demonstration runner supplies explicit fixture sizes; those sizes do not
+claim to model real glyphs.

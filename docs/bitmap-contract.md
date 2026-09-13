@@ -186,7 +186,7 @@ The surface itself provides no locks or native event scheduling.
 
 [geometry.hpp](../include/gui/geometry.hpp) defines logical client coordinates.
 Resolve ancestor group scroll offsets before deriving the bitmap's client bounds.
-`MemoryAdapter::resolved_availability(key).bounds` supplies those current bounds.
+`Adapter::resolved_availability(key).bounds` supplies those current bounds.
 `device_rect(logical_bounds, display_scale)` rounds each edge independently using
 `std::round`, then obtains width and height by subtracting the rounded endpoints.
 Shared logical edges therefore produce shared device edges, including fractional scales.
@@ -215,6 +215,14 @@ endpoint-snapped dimensions even when the declared width and height stay unchang
 Its input validation accepts pointer events only for enabled, visible widgets with
 `pointer_input` enabled and positions inside the effective clip rectangle.
 Pointer events retain logical positions; pixel mapping is an explicit caller operation.
+The public `Adapter::invalidate` requests damage without a concrete-adapter
+downcast. The application obtains full grid dimensions from `device_rect` using
+resolved bounds and the current published scale. CPU storage inspection is a
+reference test probe, not an application requirement.
+
+A bitmap can also declare ordered generic `actions` and emit `InvokeAction{id}`
+through native keyboard and accessibility interfaces. Shared handling supplies
+their meaning and routes equivalent pointer operations to the same function.
 The adapter enforces its owning thread and rejects ordinary mutations after close.
 While a producer runs, adapter mutation and event dispatch throw `std::logic_error`;
 read-only inspection remains available. The guard is released when paint returns or throws.

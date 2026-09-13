@@ -7,6 +7,7 @@ requires additional integration checks on the actual supported platforms.
 
 | Surface | Checks | Location |
 | --- | --- | --- |
+| Abstract adapter | Application uses `Adapter&`; public commands/queries, text metric values and guards, group interior clips, bitmap named actions, unknown enum rejection | [adapter tests](../tests/adapter_test.cpp) |
 | Encoding and editing | Valid and invalid UTF-8, no zero bytes, byte limits, single/multiline behavior, reversed selection, caret boundaries, unchanged/rejected replacement | [contract tests](../tests/contract_test.cpp) |
 | Declarations and lifetime | Atomic rejection, duplicate IDs, immutable declarations, removal/recreation, stale generation, UI thread affinity, permanent close | [contract tests](../tests/contract_test.cpp) |
 | Input and dropdowns | Silent presentation, stable displayed popup IDs across reorder, removed option rejection, stale text base, wrong-kind and unavailable input, submit consumption | [contract tests](../tests/contract_test.cpp) |
@@ -19,7 +20,7 @@ requires additional integration checks on the actual supported platforms.
 | Bitmap caching | Source identity, revision equality, resizing, partial invalidation, clean repaint, exception rollback/retry, paint reentrancy | [bitmap tests](../tests/bitmap_test.cpp) |
 | Services | Serial dispatch, owned payloads, stable request IDs, duplicate/stale replies, cancellation versus error, text validation, permanent closure | [runtime tests](../tests/runtime_test.cpp) |
 | UI queue | Multiple producers, capacity, bounded drain, owner-thread enforcement, reentrancy, exceptions, shutdown and resource release | [runtime tests](../tests/runtime_test.cpp) |
-| End-to-end example | Values from simulated control input, published snapshots, CPU bitmap rendering, explicit service response, queued UI update, teardown | [example](../examples/demo.cpp) |
+| End-to-end example | Separate shared application compilation, abstract injection, generic metrics/layout, all core kinds, pages, bitmap actions, host replies, queued UI update, teardown | [shared application](../examples/application.hpp), [runner](../examples/demo.cpp) |
 
 Configure and run all checks using the commands in the [README](../README.md).
 Checks use runtime failures rather than disabled release-mode assertions. The
@@ -34,6 +35,9 @@ C++ callers, allocation limits, or all possible event interleavings.
 Each public header should compile as the first include in a translation unit,
 using only the package include directory and the standard library. A build should
 also compile the shared application without any native toolkit include directory.
+CMake compiles the example application in a separate object target; its dependency
+closure contains `contract`, `layout`, `runtime`, `text`, `geometry`, and `bitmap`.
+Only the runner includes `memory_adapter.hpp`.
 These are direct checks of dependency direction; a code search alone cannot prove
 header isolation.
 
@@ -60,7 +64,9 @@ feature hooks in the production public headers.
 | Fail bitmap production or native upload | Old complete image remains usable; pending work retries |
 | Open a dialog while work completes | Event pump and queued completions continue without recursive application polling |
 | Cancel a dialog or close the window | Correct result/lifetime handling, no late mutation, no retained native borrow |
-| Read and operate controls with assistive technology | Names, values, states, row content, and actions are usable |
+| Read and operate controls with assistive technology | Names, values, states, row content, and bitmap named actions are usable |
+| Lay out text before first presentation or at a new scale | Generic measurement values match native drawing and wrapping |
+| Scroll a padded group | Its interior clip stays fixed while descendants move; pointer and drawing agree |
 
 ## Acceptance for reuse
 
