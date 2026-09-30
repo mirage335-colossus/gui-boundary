@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <type_traits>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -22,6 +23,11 @@ struct WidgetKey {
 };
 enum class Kind { group,label,button,toggle,choice,text,list,bitmap,menu };
 enum class Tone { normal,muted,accent,error };
+struct Color {std::uint8_t red=0,green=0,blue=0;bool operator==(const Color&) const = default;};
+struct Palette {
+    Color background{240,242,246},surface{255,255,255},text{25,32,45},muted{90,101,119};
+    Color accent{40,93,164},error{170,36,48},border{145,156,174},selection{210,227,250},disabled{226,230,237};
+};
 struct Font {
     double size=14;bool bold=false;Tone tone=Tone::normal;
     bool operator==(const Font&) const = default;
@@ -107,6 +113,13 @@ struct Widget { WidgetSpec spec;WidgetState state; };
 struct Page {
     std::string id,label;
     bool enabled=true,visible=true;
+    bool operator==(const Page&) const = default;
+};
+enum class ShortcutKey { escape,enter,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12 };
+struct KeyBinding {
+    ShortcutKey key=ShortcutKey::escape;
+    WidgetKey target;
+    bool control=false,shift=false,alt=false;
 };
 struct Snapshot {
     std::uint64_t revision=0;
@@ -118,6 +131,13 @@ struct Snapshot {
     std::optional<std::string> active_page;
     // Parents precede their children. Bounds are absolute logical client units.
     std::vector<Widget> widgets;
+    // Shared chrome placement, in the same coordinates as every widget.
+    Rect page_bar;
+    // A modal group limits input/focus to its subtree; background may remain
+    // visible. Children render in declaration order, later siblings on top.
+    std::optional<WidgetKey> modal_root;
+    std::vector<KeyBinding> key_bindings;
+    Palette palette;
 };
 struct Activate {};
 struct SetChecked {bool value;};
@@ -139,12 +159,24 @@ struct WidgetEvent {WidgetKey target;Input input;};
 struct PageEvent {std::string id;};
 struct ResizeEvent {Size client_size;double display_scale=1;};
 struct CloseEvent {};
-using Event=std::variant<WidgetEvent,PageEvent,ResizeEvent,CloseEvent>;
+struct ShortcutEvent {ShortcutKey key=ShortcutKey::escape;bool control=false,shift=false,alt=false;};
+using Event=std::variant<WidgetEvent,PageEvent,ResizeEvent,CloseEvent,ShortcutEvent>;
 using EventSink=std::function<void(const Event&)>;
 
 inline const Widget* find_widget(const Snapshot& view,const WidgetKey& key) {
     for(const auto& w:view.widgets)if(w.spec.key==key)return &w;
     return nullptr;
+}
+inline bool in_modal_scope(const Snapshot& view,const WidgetKey& key) {
+    if(!view.modal_root)return true;
+    const auto* current=find_widget(view,key);
+    for(std::size_t depth=0;current&&depth<=view.widgets.size();++depth) {
+        if(current->spec.key==*view.modal_root)return true;
+        if(current->spec.parent.empty())return false;
+        const auto parent=current->spec.parent;current=nullptr;
+        for(const auto& candidate:view.widgets)if(candidate.spec.key.id==parent){current=&candidate;break;}
+    }
+    return false;
 }
 struct Availability {
     Rect bounds,clip; // Resolved client bounds and their visible intersection.
@@ -191,7 +223,7 @@ inline Availability availability(const Snapshot& view,const WidgetKey& key,const
             translation.x-=offset.x;translation.y-=offset.y;
         }
         resolved.emplace(w.spec.key.id,Resolved{a,translation,children_clip});
-        if(w.spec.key==key)return a;
+        if(w.spec.key==key){a.enabled=a.enabled&&in_modal_scope(view,key);return a;}
     }
     return {};
 }
@@ -203,6 +235,7 @@ inline void validate_snapshot(const Snapshot& view) {
     const auto require=[](bool ok,const char* message){if(!ok)throw std::invalid_argument(message);};
     const auto text=[&](const std::string& s){require(valid_utf8(s),"Invalid UTF-8 presentation text");};
     require(valid_rect({0,0,view.client_size.width,view.client_size.height}),"Invalid client size");
+    require(valid_rect(view.page_bar),"Invalid page navigation bounds");
     device_rect({0,0,view.client_size.width,view.client_size.height},view.display_scale);
     (void)pixel_row_bytes(0,view.bitmap_format);
     text(view.title);
@@ -266,6 +299,28 @@ inline void validate_snapshot(const Snapshot& view) {
         }
         text(v.bitmap.source_id);
     }
+    if(view.modal_root) {
+        const auto* root=find_widget(view,*view.modal_root);
+        require(root&&root->spec.kind==Kind::group,"Modal root must name a current group");
+        for(auto* current=root;current;) {
+            require(current->state.visible&&current->state.enabled,"Modal root and ancestors must be visible and enabled");
+            if(!current->spec.page.empty()) {
+                const auto page=std::find_if(view.pages.begin(),view.pages.end(),[&](const Page& p){return p.id==current->spec.page;});
+                require(page!=view.pages.end()&&page->visible&&page->enabled&&view.active_page==page->id,
+                    "Modal root must be on an available active page");
+            }
+            if(current->spec.parent.empty())break;
+            const auto parent=std::find_if(view.widgets.begin(),view.widgets.end(),[&](const Widget& w){return w.spec.key.id==current->spec.parent;});
+            current=parent==view.widgets.end()?nullptr:&*parent;
+        }
+    }
+    std::set<std::tuple<ShortcutKey,bool,bool,bool>> strokes;
+    for(const auto& binding:view.key_bindings) {
+        require(binding.key>=ShortcutKey::escape&&binding.key<=ShortcutKey::f12,"Unknown shortcut key");
+        const auto* target=find_widget(view,binding.target);
+        require(target&&target->spec.kind==Kind::button,"Shortcut must target a current button");
+        require(strokes.emplace(binding.key,binding.control,binding.shift,binding.alt).second,"Duplicate shortcut");
+    }
 }
 // Shared event policy for an already validated presentation. Scroll offsets
 // must match the presentation being checked. A successful normalization may
@@ -314,17 +369,26 @@ inline bool normalize_widget_event(const Snapshot& view,WidgetEvent& event,const
     },event.input);
 }
 inline bool normalize_event(const Snapshot& view,Event& event,const ScrollLookup& scroll={}) {
+    if(const auto* key=std::get_if<ShortcutEvent>(&event)) {
+        std::optional<WidgetKey> target;
+        for(const auto& binding:view.key_bindings)
+            if(binding.key==key->key&&binding.control==key->control&&binding.shift==key->shift&&binding.alt==key->alt){target=binding.target;break;}
+        if(!target)return false;
+        event=WidgetEvent{*target,Activate{}};
+    }
     return std::visit([&](auto& value)->bool {
         using T=std::decay_t<decltype(value)>;
         if constexpr(std::is_same_v<T,WidgetEvent>)return normalize_widget_event(view,value,scroll);
         else if constexpr(std::is_same_v<T,PageEvent>) {
+            if(view.modal_root)return false;
             for(const auto& page:view.pages)if(page.id==value.id)
                 return page.enabled&&page.visible&&view.active_page!=page.id;
             return false;
         } else if constexpr(std::is_same_v<T,ResizeEvent>) {
             return valid_rect({0,0,value.client_size.width,value.client_size.height})&&
                 std::isfinite(value.display_scale)&&value.display_scale>0&&value.display_scale<=16;
-        } else return true;
+        } else if constexpr(std::is_same_v<T,ShortcutEvent>)return false;
+        else return true;
     },event);
 }
 // The adapter owns native objects. The caller retains application state.

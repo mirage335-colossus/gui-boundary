@@ -2,7 +2,8 @@
 
 This contract separates application lifetime, native event delivery, background work, and platform requests.
 Its reference facilities are [`UiQueue`, `ServiceQueue`, and their value types](../include/gui/runtime.hpp).
-Their executable checks are in [`runtime_test.cpp`](../tests/runtime_test.cpp).
+Their shared executable checks are in [`runtime_test.cpp`](../tests/runtime_test.cpp).
+Concrete hosts and their service profiles are described below.
 The header requires C++20 and the standard library; it does not start a thread, create a window, or enter an event loop.
 
 ## Implemented facilities and integration responsibilities
@@ -24,7 +25,7 @@ Both queues are per-instance objects; independent windows or application instanc
 
 ## Shared facade and lifecycle
 
-A future application should expose one toolkit-independent facade to every adapter.
+An application exposes one toolkit-independent facade to every adapter.
 That facade supplies presentation values, accepts declared input, advances shared work, and exchanges platform requests and results.
 It must keep worker implementations and application storage private.
 Native widgets hold declaration identities and presentation data, with no need to inspect private application objects.
@@ -121,7 +122,9 @@ File selection acquires a path only; the adapter must not read, create, replace,
 The application decides what to do with the path and handles subsequent file-operation errors.
 It also owns content retained while a selection is pending, so later UI changes cannot silently substitute different content.
 Use direct host APIs or argument-vector process invocation for an opener; do not interpret the location as shell text.
-Define supported location forms and unsupported-service behavior in each native adapter.
+Define supported location forms and unsupported-service behavior in each adapter.
+The file kinds specify local path selection only. They do not define browser
+file objects, upload/download transfer, or a remote shared-filesystem guarantee.
 Clipboard success means the documented host operation succeeded; persistence after application exit depends on the host and must be documented.
 
 `ServiceResult` contains the matching ID, explicit `ServiceStatus`, value, and error text.
@@ -187,6 +190,72 @@ A queued UI callback must recheck the operation's identity even if it was posted
 Late and duplicate replies must not complete a newer operation or reopen a closed queue.
 The queue's at-most-once reply acceptance does not prove that an external effect happened exactly once; uncertain host outcomes require explicit application handling.
 
+## Concrete service profiles
+
+| Profile | Functioning service route | Explicit limits |
+|---|---|---|
+| Memory/reference | Shared `ServiceQueue` and supplied test completions | No implicit platform service implementation |
+| FLTK | Nonblocking prompt controls and host clipboard text writing | File selection and location opening return errors in this example |
+| Terminal and framebuffer/SDL | `InteractiveAdapter::service` owns prompt state, input modality and matching callback; selected renderer draws it | Other service kinds require a host implementation and return errors |
+| Hosted browser and Wasm | Asynchronous DOM `<dialog>` prompt using the shared request/result protocol | File selection, clipboard writing and location opening return explicit unsupported-service errors |
+
+The browser prompt uses a labeled editor, OK/Cancel, Enter acceptance and Escape
+cancellation. It enforces the declared UTF-8 byte limit before submitting and
+the shared queue validates the reply again. DOM modal behavior traps focus and
+makes background controls inert; dialog key handling cannot trigger underlying
+application shortcuts. It returns to the browser event loop while open. It does
+not call blocking `window.prompt`, which some embedded browser hosts do not
+support. Failure to construct a dialog becomes a matching error completion.
+After dismissal, focus returns to a surviving native control; later shared
+presentation can invalidate or replace that focus.
+
+Browser service titles, default values and requested reply-byte limits each have
+a 64 KiB profile maximum. An oversized request completes with an error before
+being offered to the DOM. This is a narrower concrete profile than the generic
+queue, whose title/output-only text has no reference byte cap.
+
+Software prompts use the same interaction engine in terminal and framebuffer;
+their appearance follows each rendering profile. This reuses service identity,
+editing and modality mechanics without adding application feature meaning to a
+renderer. Native widget prompts use toolkit controls with the same shared
+request/completion ownership.
+
+## Hosted transport lifetime and progress
+
+Each hosted browser tab owns a native application subprocess and random epoch.
+The local HTTP host binds only loopback, validates exact Host and Origin, and
+requires an unguessable per-session token for events and release. It accepts at
+most 16 simultaneous sessions. Sessions expire after 15 idle minutes; the host's
+regular service loop reaps them. A page-hide release request closes its process,
+and server shutdown closes every remaining owned child. Release/expiry is a
+resource-lifetime action, not replay of a shared application command.
+
+Browser operations run serially under epoch/sequence/acknowledgment rules.
+An uncertain delivery retains the same envelope for explicit retry. A new
+session starts fresh state; it does not replay old pending edits or commands.
+Snapshot revision and widget generations protect different identities and must
+not substitute for the transport sequence. A service reply additionally carries
+its request ID and cannot settle a later request.
+
+HTTP input is capped at 1 MiB and reframed as one validated JSON line for the
+backend, independent of whitespace in the submitted document. Duplicate keys
+are rejected. Backend output has a 96 MiB host cap and a 15-second response
+deadline; the subprocess bridge and browser adapter have their own documented
+decode/presentation limits. See the [widget specification](specification.md).
+The Python host uses pipe readiness and is a local POSIX hosting example, not a
+remote deployment or authentication service.
+
+Wasm runs the same application/session protocol in a module. The browser owns
+that module's lifetime; there is no native child process to release. Both browser
+modes share renderer, pending-edit/focus handling, metric feedback and DOM
+service execution. No service depends on a C++ pointer surviving a JSON message.
+
+Renderer-owned interaction state remains subject to `MemoryAdapter` guards.
+Concrete renderers call `require_interaction` before changes that must be blocked
+during bitmap painting or metric callbacks. External raster work can run through
+`paint_ui`; alternate bitmap grids use `sample_bitmap`. These checks preserve
+owner-thread and lifecycle rules without creating a second input policy.
+
 ## Shutdown and conformance
 
 On close, mark the shared instance closing first and reject further ordinary input or new work.
@@ -198,7 +267,7 @@ Its `shutdown()` discards queued tasks and destroys their captures outside the m
 End all producer access and scheduled native callbacks, then release widgets, native resources, queues, and the facade in lifetime-safe order.
 Neither queue can reopen after shutdown; repeated shutdown calls are allowed.
 
-Future native conformance must verify progress while menus and dialogs are open, safe focus restoration, borrowed-text lifetime, unsupported services, and host failure translation.
+Native conformance must verify progress while menus and dialogs are open, safe focus restoration, borrowed-text lifetime, unsupported services, and host failure translation.
 It must also exercise close during a pending operation, delayed callback delivery, deadline races, rejected UI posts, and continued painting while workers stop.
 The supplied runtime tests cover queue ordering, identity, text validation, task budgets, thread ownership, exceptions, and retained-resource release.
 They do not certify a native toolkit's event loop, real dialogs, clipboard behavior, operating-system conversions, or application worker shutdown.

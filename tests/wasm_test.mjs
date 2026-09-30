@@ -1,0 +1,31 @@
+// Execute the real compiled C++ module; this does not substitute a DOM test.
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const path=resolve(process.argv[2]||'build-wasm/gui_web_wasm.js');
+const {default:createModule}=await import(pathToFileURL(path).href);
+const module=await createModule({wasmBinary:await readFile(path.replace(/\.js$/,'.wasm'))});
+let state=JSON.parse(module.ccall('gui_web_create','string',['string'],['first-module-session']));
+let sequence=0;
+const send=operation=>{
+  state=JSON.parse(module.ccall('gui_web_receive','string',['string'],[JSON.stringify({epoch:state.epoch,seq:String(++sequence),operation})]));
+  assert.equal(state.ack,String(sequence));assert.equal(state.error,'');return state;
+};
+const widget=kind=>state.snapshot.widgets.find(value=>value.kind===kind);
+const editor=widget(5).key,toggle=widget(3).key,button=widget(2).key;
+send({type:'edit',key:editor,base:widget(5).text,value:'Compiled Wasm ✓'});
+send({type:'checked',key:toggle,value:true});send({type:'activate',key:button});
+assert.equal(widget(6).records.length,1);
+assert.equal(widget(6).records[0].cells[0].text,'Compiled Wasm ✓');
+send({type:'submit',key:editor});assert.ok(state.service);
+send({type:'service',id:state.service.id,status:'success',value:'Completed module service',error:''});
+assert.ok(state.snapshot.widgets.some(value=>value.text==='Completed module service'));
+const epoch=state.epoch;
+send({type:'close'});assert.equal(state.snapshot.closed,true);
+state=JSON.parse(module.ccall('gui_web_create','string',['string'],['second-module-session']));sequence=0;
+assert.equal(state.snapshot.closed,false);assert.equal(widget(6).records.length,0);
+assert.notEqual(state.epoch,epoch);
+const stale=JSON.parse(module.ccall('gui_web_receive','string',['string'],[JSON.stringify({epoch,seq:'1',operation:{type:'activate',key:button}})]));
+assert.equal(stale.ack,'0');assert.ok(stale.error);
+console.log('Actual Wasm editing, records, service, close and recreation passed');

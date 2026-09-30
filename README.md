@@ -1,91 +1,135 @@
 # Generic GUI boundary
 
-A reusable specification and executable C++20 reference for ordinary GUI
-controls, composed views, bitmap framebuffer areas, user input, and host services.
-All application identifiers are opaque strings. The public headers use only the
-C++ standard library and the headers in this package.
+A standalone C++20 example with one application and functioning native-widget,
+terminal, browser, WebAssembly, and software-framebuffer backends. No other
+application or repository is needed. Public headers use only the C++ standard
+library and this package's headers.
 
-The package includes:
-
-- [Widget specification](docs/specification.md): vocabulary, every input and
-  output, identity, state, event rules, text, lists, focus, and ownership.
-- [Bitmap contract](docs/bitmap-contract.md): byte storage, formats, retained
-  sources, damage, resizing, coordinate conversion, and repaint guarantees.
-- [Layout contract](docs/layout-contract.md): measured rows, columns, padding,
-  allocation, and clipping.
-- [Runtime contract](docs/runtime-contract.md): UI work queues, host services,
-  lifecycle, cancellation, and shutdown.
-- [Adapter guide](docs/adapter-guide.md): end-to-end call paths, native integration,
-  accessibility, dependency rules, and extension guidance.
-- [Conformance coverage](docs/conformance.md): executable checks and the checks
-  required when adding a native adapter.
-- [Boundary audit](docs/audit.md): corrected gaps, edit ownership, duplication
-  assessment, verification results, and remaining capability limits.
-- [Feature recipes and completeness inventory](docs/feature-recipes.md): shared-side
-  examples for the essential operations and explicit limits of the vocabulary.
-- [Shared application example](examples/application.hpp), [display-free runner](examples/demo.cpp),
-  and [public headers](include/gui).
-
-`MemoryAdapter` is a display-free reference for the core widget operations.
-The shared example receives only `Adapter&`; the runner supplies the concrete
-implementation and simulated input. Text measurement requires an explicitly
-supplied metrics provider because a display-free object cannot supply native
-glyph metrics. It retains widget state, validates and routes simulated input, maintains
-focus and scrolling, and renders CPU bitmap storage. A native adapter must supply
-actual windows, controls, glyph drawing, native input, accessibility integration,
-and platform service execution. The reference does not open a window.
+[The application](examples/application.hpp) owns features, values, layout,
+structured rows, bitmap producers, modal views and shortcuts. It receives only
+`gui::Adapter&`. Adapters interpret opaque keys and a shared vocabulary; they
+never select behavior from application identifiers, labels or bindings.
 
 ## Build and run
 
-Requirements: a C++20 compiler, CMake 3.20 or newer, and standard thread support.
-No downloads or third-party libraries are required.
+The default build needs CMake 3.20+, a C++20 compiler and thread support. Python 3
+runs the browser host and additional tests; Node runs the DOM fixture tests.
+There are no automatic downloads.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ./build/gui_example
+./build/gui_terminal
+./build/gui_framebuffer --output build/example.ppm
+python3 backends/web/host.py --executable build/gui_web_demo --port 8765
 ```
 
-On generators that select a configuration at build time, add `--config Debug`
-to the build and test commands and use the executable in that configuration's
-directory. The example prints its final control values and bitmap dimensions.
+Open `http://127.0.0.1:8765/` for the browser. Each tab gets an independent C++
+process and transport epoch. The development host binds only to loopback.
+It is a local example host, not an Internet deployment server.
 
-## Use in a new application
+The terminal projects the **same logical rectangles** into 8×16 cells. Tab and
+Shift+Tab move focus, Enter/Space activate, arrows navigate lists/options,
+Alt+Down opens suggestions/actions, Ctrl+Tab changes pages, and Ctrl+Q quits.
+Mouse reporting and bracketed paste are supported. An 80×30 terminal shows the
+640×480 view; smaller terminals pan to focused controls. Text is treated as
+literal data, never terminal escape instructions.
 
-1. Link the `gui_boundary` interface target, or add `include` to the include path.
-2. Declare stable widget keys and create an owned `gui::Snapshot`.
-3. Request native text metrics through `Adapter::measure_text`, compute layout
-   in logical client units, and publish the snapshot through
-   `gui::Adapter::present`.
-4. Handle `gui::Event` in shared application code, update authoritative values,
-   and publish the next snapshot.
-5. Supply immutable `gui::BitmapSource` handles for bitmap widgets.
-6. Use `gui::UiQueue` for worker-to-UI handoff and `gui::ServiceQueue` for host
-   requests and replies.
-7. Implement the native responsibilities in the adapter guide and run the
-   conformance checks on each supported platform.
+The dependency-free framebuffer runner produces a complete RGB frame and PPM
+file. For an interactive window, install the SDL2 development package:
 
-The public types intentionally describe GUI input and output. Adding another
-button, option, text field, list, or bitmap source requires declarations and
-shared application handling; the native adapter continues to interpret the same
-generic vocabulary.
+```sh
+cmake -S . -B build -DGUI_BUILD_SDL=ON
+cmake --build build --parallel
+./build/gui_framebuffer_sdl
+```
 
-## Scope of completeness
+For native widgets, install the FLTK development package (1.3+):
 
-The core covers the declared nine widget kinds, retained control commands and
-queries, measured composition, named bitmap actions, pixel transfer, events,
-and service queues. The public `Adapter` surface contains the application-facing
-operations; native callback probes and CPU image inspection remain on the
-reference implementation. It is a reusable core specification, not an inventory
-of every control or host capability a future application could require.
-Additional primitives or service kinds require a documented contract extension.
+```sh
+cmake -S . -B build -DGUI_BUILD_FLTK=ON
+cmake --build build --parallel
+./build/gui_fltk_demo
+```
 
-This standalone API is separate from the integrated application interfaces that
-informed the audit. Those native backends do not implement `gui::Adapter` and
-are not supplied as portable backends for this package. Feature insulation inside
-an application and extracting a drop-in toolkit library are different milestones.
+For WebAssembly, use an installed Emscripten toolchain. Both browser modes use
+the same renderer, protocol, C++ application and retained policy engine:
 
-Native adapters still have to implement and verify actual controls, glyphs,
-keyboard/accessibility behavior, service execution, and event-loop progress.
-This package neither supplies nor certifies a production native backend.
+```sh
+emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build build-wasm --parallel
+node tests/wasm_test.mjs build-wasm/gui_web_wasm.js
+python3 backends/web/host.py --wasm-dir build-wasm --port 8765
+```
+
+Open `http://127.0.0.1:8765/?mode=wasm`. Add `--executable build/gui_web_demo`
+to that host command to serve both modes together. Multi-configuration build
+generators need `--config Debug` (or Release) and the matching executable path.
+
+## Shared feature editing
+
+For an ordinary new feature, change shared application declarations, shared
+layout, and event handling. New options, rows, validation, bitmap content,
+modal groups and bound actions use the existing contract. Backend source stays
+unchanged. [Extension tests](tests/extension_test.cpp) add a separate application
+feature after initial presentation, drive it through four adapter families, and
+compare normalized intentions and resulting geometry. The
+[architecture check](tests/architecture_test.py) guards dependency direction and
+literal feature-ID branching; it also verifies that injected violations fail.
+
+`MemoryAdapter` centralizes validation, generations, input normalization, focus,
+list policy, retained state and guarded bitmap sampling. `InteractiveAdapter`
+centralizes physical keyboard/pointer editing, popup and prompt behavior for
+terminal and framebuffer renderers. Native toolkit and DOM adapters translate
+their controls into the same semantic events. Page geometry, modal ordering,
+semantic colors, clipping, and application layout remain shared.
+
+This guarantees a concrete extension path for the documented vocabulary. A new
+primitive outside that vocabulary still needs a contract and generic adapter
+support. Backend code necessarily differs where it draws glyphs, integrates
+native controls, transports bytes or calls host services.
+
+## Verification
+
+The default CTest suite includes policy, lifetime, rollback, interaction,
+geometry, bitmap sampling, extension and dependency checks. Every public header
+and the shared application also compile independently of native toolkits.
+
+Enable tests that use a PTY, loopback socket or native display explicitly:
+
+```sh
+cmake -S . -B build -DGUI_TEST_HOSTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+With FLTK enabled, run the last command under a display, for example
+`xvfb-run -a ctest --test-dir build --output-on-failure` on Linux. The SDL test
+uses its dummy video driver and injects real SDL events. The PTY test checks
+input, resize, signal cleanup and output backpressure. Browser fixture tests
+complement real-browser checks; see [coverage](docs/conformance.md).
+
+## Profiles and contracts
+
+Layouts share coordinates, ordering and palette. Terminal cell rounding and
+native font metrics can produce small size differences. The default framebuffer
+font is a small ASCII demonstration font; other Unicode characters show a
+fallback glyph while their UTF-8 values remain intact. A paired text measurement
+and raster provider can replace that font without changing application code.
+Native/DOM text and accessibility depend on their host. The software profiles do
+not supply an OS accessibility or IME engine.
+
+All interactive profiles implement prompts. Unsupported host services return
+explicit errors; service queues, cancellation and completion identity are shared.
+Platform limits and tested coverage are recorded rather than disguised as
+successful operations.
+
+- [Widget specification](docs/specification.md)
+- [Bitmap contract](docs/bitmap-contract.md)
+- [Layout and presentation](docs/layout-contract.md)
+- [Runtime and services](docs/runtime-contract.md)
+- [Adapter implementation guide](docs/adapter-guide.md)
+- [Feature recipes](docs/feature-recipes.md)
+- [Boundary audit](docs/audit.md)

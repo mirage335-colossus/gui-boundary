@@ -171,6 +171,32 @@ void source_contract() {
     check(gray.pixels() == std::vector<std::uint8_t>({255,128,255,128}), "solid source packed padding");
 }
 
+void cell_fitting() {
+    BitmapImage original(2,2,PixelFormat::gray8);
+    const std::array<std::uint8_t,4> values{40,80,120,240};
+    original.blit(0,0,{2,2,2,PixelFormat::gray8,values});
+    const auto source=image_bitmap(original);
+    auto request=full_bitmap_request(4,2,PixelFormat::gray8);request.fit_content=true;request.sample_aspect_ratio=.5;
+    const auto fitted=collect(source,request);
+    check(fitted.pixels()==std::vector<std::uint8_t>({40,40,80,80,120,120,240,240}),"Non-square cells changed image aspect");
+    request.sample_aspect_ratio=1;
+    const auto boxed=collect(source,request);
+    check(boxed.pixels()==std::vector<std::uint8_t>({0,40,80,0,0,120,240,0}),"Centered physical letterboxing changed");
+    BitmapImage tiled(4,2,PixelFormat::gray8);
+    for(unsigned x=0;x<4;++x)for(unsigned y=0;y<2;++y) {
+        request.damage={x,y,1,1};source.paint(request,[&](unsigned px,unsigned py,PixelBlock b){tiled.blit(px,py,b);});
+    }
+    check(tiled.pixels()==boxed.pixels(),"Cell-grid partial paint changed sampling coordinates");
+    request.sample_aspect_ratio=0;
+    rejects<std::invalid_argument>([&]{collect(source,request);},"Zero sample aspect accepted");
+    request.sample_aspect_ratio=std::numeric_limits<double>::quiet_NaN();
+    rejects<std::invalid_argument>([&]{collect(source,request);},"NaN sample aspect accepted");
+    request.sample_aspect_ratio=1;request.damage={0,0,4,2};
+    check(collect(image_bitmap({}),request).pixels()==std::vector<std::uint8_t>(8),"Empty fitted source did not clear");
+    BitmapSource discrete({},BitmapSampling::discrete,{0,0,21,21});
+    check(discrete.sampling()==BitmapSampling::discrete&&discrete.minimum_extent().width==21,"Discrete sampling metadata lost");
+}
+
 void source_release_during_paint() {
     auto content = std::make_shared<const std::uint8_t>(42);
     const std::weak_ptr<const std::uint8_t> lifetime = content;
@@ -324,7 +350,7 @@ void copy_move_lifetime() {
 
 int main() {
     try {
-        storage_validation(); conversion_and_overlap(); source_contract(); source_release_during_paint();
+        storage_validation(); conversion_and_overlap(); source_contract(); cell_fitting(); source_release_during_paint();
         surface_lifecycle(); replacement_and_failures(); copy_move_lifetime();
         std::cout << "Bitmap contract checks passed\n";
         return 0;

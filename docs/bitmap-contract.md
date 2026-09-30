@@ -122,9 +122,11 @@ Conversions have fixed rules:
 `solid_bitmap(red, green, blue)` creates an immutable source for any requested grid.
 It converts to the requested format and emits one row at a time.
 `image_bitmap(image)` captures an owning image by value and converts requested rows.
-Its nonempty requests must match the captured width and height exactly.
-It performs no implicit scaling when a receiver changes dimensions.
-Use a different snapshot or a producer that supports the new grid when resizing fixed data.
+By default its nonempty requests must match the captured width and height exactly.
+It performs no implicit scaling when a receiver changes dimensions. A receiver
+can explicitly request physical-grid fitting through `fit_content`; that common
+sampling path is specified below. Otherwise supply a different snapshot or a
+producer supporting the new grid when resizing fixed data.
 
 For example, an immutable byte buffer can become a retained source:
 
@@ -258,3 +260,41 @@ retry, output-format enforcement, damage enforcement, and mutation during repain
 These are executable CPU checks. This package does not implement or certify a native backend.
 Future native conformance must additionally verify actual rendered pixels, fractional display
 scales, origin snapping, clipping, empty allocations, upload lifetime, and resource cleanup.
+
+## Cell sampling and complete application frames
+
+`BitmapRequest` additionally carries `sample_aspect_ratio` (physical width divided
+by height of one sample, default 1) and `fit_content` (default false). The ratio
+must be finite, positive and at most 1024. Producers that generate content for an
+arbitrary grid should honor its physical geometry. Damage still addresses that
+complete grid and never changes its mapping.
+
+`image_bitmap(image)` preserves the original exact-grid default. With an explicit
+`fit_content` request it fits the image in the physical grid using nearest-neighbor
+sampling, centers it and fills unused space black. Full and tiled paints produce
+identical results. An empty source paints black. The helper owns its image.
+
+A `BitmapSource` declares `BitmapSampling::continuous` or `discrete` and a minimum
+sample extent. This is content metadata, not an application-specific ID. For
+example, terminal rendering can show a clear too-small placeholder for a discrete
+symbol instead of reducing it into misleading detail. `image_bitmap` accepts
+these optional parameters; a discrete image defaults its minimum to its original
+grid. Other producers can declare their own minimum useful grid. The terminal
+requests cells with aspect 0.5 and fitting enabled, avoiding a second hidden
+pixel-image allocation. `MemoryAdapter::sample_bitmap` enforces the same budget,
+block validation, owned storage and producer reentry guards as normal painting.
+
+`FramebufferAdapter::frame(last_seen_revision)` returns a complete application
+frame, not merely one bitmap widget. Its immutable pixel storage can outlive the
+adapter's next render. Dimensions, stride, format, revision, base revision and
+damage are explicit. An unchanged frame has no damage; a host that missed a
+revision or resized receives full damage. Damage is an upload optimization; the
+returned storage always contains every pixel. Failed rendering leaves the last
+complete frame intact. The SDL host uploads that frame; the PPM host illustrates
+embedding without a window.
+
+The software renderer's default font supplies ASCII glyphs. `FramebufferTextRenderer`
+pairs a metrics provider with a guarded painter receiving UTF-8 text, logical
+bounds, font, wrap, scale and color. An embedder can supply a richer font engine
+without changing the application. Provider callbacks cannot mutate input or
+presentation while drawing, and rectangle output is clipped by the renderer.

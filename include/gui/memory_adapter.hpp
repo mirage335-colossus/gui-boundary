@@ -15,6 +15,9 @@ enum class ListKey { up,down,space,enter };
 // adapter. Adapter mutation and event dispatch during paint are rejected.
 class MemoryAdapter final : public Adapter {
 public:
+    // Concrete adapters use this for renderer-owned interaction state, so a
+    // bitmap producer or metrics callback cannot reenter physical input paths.
+    void require_interaction() const {require_mutable();}
     explicit MemoryAdapter(EventSink sink={},std::size_t bitmap_budget=64*1024*1024,TextMeasure measure={})
         : owner_(std::this_thread::get_id()),sink_(std::move(sink)),bitmap_budget_(bitmap_budget),measure_(std::move(measure)) {}
     MemoryAdapter(const MemoryAdapter&)=delete;
@@ -54,6 +57,7 @@ public:
             entry.offset.y=w.spec.follow_tail&&was_at_tail?maximum.y:std::clamp(entry.offset.y,0.0,maximum.y);
             entries.emplace(w.spec.key.id,std::move(entry));
         }
+        require_modal_visible(next,entries);
         prepare_bitmaps(next,entries,bitmap_budget_);
         auto focus=focus_;
         if(focus) {
@@ -116,6 +120,7 @@ public:
             // Fractional movement can change endpoint-snapped bitmap extents.
             // Prepare grids and interaction state before committing the scroll.
             auto entries=entries_;entries.at(key.id).offset=offset;
+            require_modal_visible(snapshot_,entries);
             prepare_bitmaps(snapshot_,entries,bitmap_budget_);
             auto focus=focus_;prune_unavailable(snapshot_,entries,focus);
             entries_=std::move(entries);focus_=std::move(focus);
@@ -204,6 +209,14 @@ public:
     void invalidate(const WidgetKey& key,PixelRect damage) override {
         require_mutable();require_kind(key,Kind::bitmap);at(key).bitmap.invalidate(damage);
     }
+    // Concrete software renderers may invoke an external glyph painter under
+    // the same no-mutation rule as an application bitmap producer.
+    void paint_ui(const std::function<void()>& paint) {
+        require_mutable();
+        if(!paint)throw std::invalid_argument("UI painter is empty");
+        struct Guard {bool& flag;explicit Guard(bool& value):flag(value){flag=true;}~Guard(){flag=false;}} guard(painting_);
+        paint();
+    }
     bool repaint(const WidgetKey& key) {
         require_mutable();require_kind(key,Kind::bitmap);
         if(!resolve_availability(snapshot_,entries_,key).visible)return false;
@@ -212,6 +225,19 @@ public:
     }
     const BitmapImage& image(const WidgetKey& key) const {
         require_open();require_kind(key,Kind::bitmap);return at(key).bitmap.image();
+    }
+    // Backend-specific grids (for example character cells) use the same
+    // guarded producer boundary as ordinary pixel repainting.
+    BitmapImage sample_bitmap(const WidgetKey& key,const BitmapRequest& request) {
+        require_mutable();require_kind(key,Kind::bitmap);validate_bitmap_request(request);
+        const auto row=pixel_row_bytes(request.width,request.format);
+        if(request.height&&row>bitmap_budget_/request.height)throw std::length_error("Bitmap budget exceeded");
+        BitmapImage image(request.width,request.height,request.format);
+        if(!resolved_availability(key).visible)return image;
+        const auto source=find_widget(snapshot_,key)->state.bitmap.source;
+        struct Guard {bool& flag;explicit Guard(bool& f):flag(f){flag=true;}~Guard(){flag=false;}} guard(painting_);
+        source.paint(request,[&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);});
+        return image;
     }
     bool closed() const override {require_thread();return closed_;}
     void close() override {
@@ -276,6 +302,14 @@ private:
     }
     void require_thread() const {
         if(std::this_thread::get_id()!=owner_)throw std::logic_error("Adapter requires the UI thread");
+    }
+    static void require_modal_visible(const Snapshot& view,const std::map<std::string,Entry,std::less<>>& entries) {
+        // A minimized host can temporarily have an empty client. Otherwise the
+        // retained scroll state must not put a modal outside every input clip.
+        if(view.modal_root&&view.client_size.width>0&&view.client_size.height>0) {
+            const auto area=resolve_availability(view,entries,*view.modal_root);
+            if(!area.visible||!area.enabled)throw std::invalid_argument("Retained scrolling hides the modal root");
+        }
     }
     void require_open() const {require_thread();if(closed_)throw std::logic_error("Adapter is closed");}
     void require_not_painting() const {

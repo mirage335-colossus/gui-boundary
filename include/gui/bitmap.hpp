@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -19,6 +20,7 @@ namespace gui {
 // All coordinates use a top-left origin, x to the right and y downward.
 // Rectangles are half-open. A width or height of zero denotes an empty area.
 enum class PixelFormat { mono1, gray8, rgb24 };
+enum class BitmapSampling { continuous,discrete };
 struct PixelRect {
     unsigned x = 0, y = 0, width = 0, height = 0;
     bool operator==(const PixelRect&) const = default;
@@ -37,6 +39,8 @@ struct BitmapRequest {
     unsigned width = 0, height = 0;
     PixelRect damage;
     PixelFormat format = PixelFormat::rgb24;
+    double sample_aspect_ratio = 1;
+    bool fit_content = false;
 };
 inline BitmapRequest full_bitmap_request(unsigned width, unsigned height,
                                          PixelFormat format = PixelFormat::rgb24) {
@@ -110,6 +114,8 @@ inline std::size_t validate_pixel_block(PixelBlock block) {
     return needed;
 }
 inline void validate_bitmap_request(const BitmapRequest& request) {
+    if(!std::isfinite(request.sample_aspect_ratio)||request.sample_aspect_ratio<=0||request.sample_aspect_ratio>1024)
+        throw std::invalid_argument("Invalid physical sample aspect ratio");
     (void)pixel_row_bytes(request.width, request.format);
     bitmap_detail::contained(request.damage, {0, 0, request.width, request.height});
 }
@@ -126,9 +132,15 @@ class BitmapSource {
 public:
     using Paint = std::function<void(const BitmapRequest&, const BitmapSink&)>;
     BitmapSource() = default;
-    explicit BitmapSource(Paint paint) {
+    explicit BitmapSource(Paint paint,BitmapSampling sampling=BitmapSampling::continuous,PixelRect minimum_extent={})
+        :sampling_(sampling),minimum_extent_(minimum_extent) {
+        if(sampling!=BitmapSampling::continuous&&sampling!=BitmapSampling::discrete)
+            throw std::invalid_argument("Unknown bitmap sampling policy");
+        if(minimum_extent.x||minimum_extent.y)throw std::invalid_argument("Minimum bitmap extent must start at the origin");
         if (paint) paint_ = std::make_shared<const Paint>(std::move(paint));
     }
+    BitmapSampling sampling() const {return sampling_;}
+    PixelRect minimum_extent() const {return minimum_extent_;}
     void paint(const BitmapRequest& request, const BitmapSink& sink) const {
         validate_bitmap_request(request);
         if (bitmap_detail::empty(request.damage) || !paint_) return;
@@ -146,6 +158,8 @@ public:
     }
 private:
     std::shared_ptr<const Paint> paint_;
+    BitmapSampling sampling_=BitmapSampling::continuous;
+    PixelRect minimum_extent_;
 };
 
 // Owning tightly packed storage. New pixels are black. blit validates before
@@ -229,25 +243,42 @@ inline BitmapSource solid_bitmap(std::uint8_t red, std::uint8_t green, std::uint
     });
 }
 
-// Owns a snapshot by value. Grid dimensions must match; resizing is an explicit
-// producer concern. Reads and converts only requested pixels, one row at a time.
-inline BitmapSource image_bitmap(BitmapImage image) {
+// Owns a snapshot by value. The default requires the original grid. An explicit
+// fit_content request fits and centers the image in the physical sample grid,
+// using nearest-neighbor samples and black letterboxing. Damage never changes
+// that mapping. This common helper also handles non-square terminal cells.
+inline BitmapSource image_bitmap(BitmapImage image,BitmapSampling sampling=BitmapSampling::continuous,
+                                 PixelRect minimum_extent={}) {
+    if(sampling==BitmapSampling::discrete&&!minimum_extent.width&&!minimum_extent.height)
+        minimum_extent={0,0,image.width(),image.height()};
     return BitmapSource([image = std::make_shared<const BitmapImage>(std::move(image))]
         (const BitmapRequest& request, const BitmapSink& sink) {
-        if (request.width != image->width() || request.height != image->height())
+        if (!request.fit_content && (request.width != image->width() || request.height != image->height()))
             throw std::invalid_argument("bitmap image and requested grid differ");
         const auto input = image->block();
         const auto area = request.damage;
+        double width=request.width,height=request.height,left=0,top=0;
+        if(request.fit_content && input.width && input.height) {
+            const double scale=std::min(double(request.width)*request.sample_aspect_ratio/input.width,
+                                        double(request.height)/input.height);
+            width=double(input.width)*scale/request.sample_aspect_ratio;
+            height=double(input.height)*scale;
+            left=(request.width-width)/2;top=(request.height-height)/2;
+        }
         std::vector<std::uint8_t> row(pixel_row_bytes(area.width, request.format), 0);
         for (unsigned y = 0; y < area.height; ++y) {
             std::fill(row.begin(), row.end(), 0);
-            for (unsigned x = 0; x < area.width; ++x)
+            for (unsigned x = 0; x < area.width; ++x) {
+                const double px=double(area.x+x)+.5,py=double(area.y+y)+.5;
+                if(!input.width || !input.height || px<left || py<top || px>=left+width || py>=top+height)continue;
+                const auto sx=std::min(input.width-1,static_cast<unsigned>((px-left)*input.width/width));
+                const auto sy=std::min(input.height-1,static_cast<unsigned>((py-top)*input.height/height));
                 bitmap_detail::write(row.data(), x, request.format,
-                    bitmap_detail::read(input.bytes.data() + input.stride_bytes * (area.y + y),
-                                        area.x + x, input.format));
+                    bitmap_detail::read(input.bytes.data() + input.stride_bytes * sy,sx,input.format));
+            }
             sink(area.x, area.y + y, {area.width, 1, row.size(), request.format, row});
         }
-    });
+    },sampling,minimum_extent);
 }
 
 // A CPU reference surface. UI adapters present image() at 1:1 backing-pixel

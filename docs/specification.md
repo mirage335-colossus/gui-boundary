@@ -1,9 +1,11 @@
 # Widget boundary specification
 
-This document defines a general-purpose GUI boundary suitable for a future
-project specification. **Must** denotes required behavior. **May** denotes an
-implementation choice that preserves the stated behavior. The C++ reference
-uses owned values and a display-free adapter to make these rules executable.
+This document defines the package's general-purpose UI boundary. **Must** denotes
+required behavior. **May** denotes an implementation choice that preserves it.
+The retained C++ engine and concrete native, terminal, framebuffer and browser
+profiles make these rules executable. Profile adaptations and limits are explicit
+in [conformance coverage](conformance.md); a small software font or a cell display
+does not claim the shaping/accessibility capabilities of native controls.
 
 Related contracts specify [bitmaps](bitmap-contract.md),
 [layout](layout-contract.md), and [runtime services](runtime-contract.md).
@@ -56,6 +58,10 @@ requests a page change. `ResizeEvent` reports logical client size and display
 scale. `CloseEvent` requests closure; shared application handling starts its
 shutdown sequence.
 
+`ShortcutEvent` reports Escape, Enter or F1–F12 plus Control/Shift/Alt flags.
+Shared key bindings resolve it to an ordinary eligible button activation. It is
+not an unrestricted raw-key callback or a backend-specific feature command.
+
 The core uses these primitives to compose ordinary interfaces. A numeric field
 can use a text editor with application validation; an exclusive set can use a
 choice; a progress readout can use native text and a bitmap. Additional native
@@ -72,6 +78,10 @@ Captured bitmap data follows its separate immutable-lifetime contract.
 | Value | Rule |
 | --- | --- |
 | `Snapshot::revision` | Informational presentation token. The reference validates every call, including equal tokens. It does not infer ordering from the number. |
+| `Snapshot::page_bar` | Shared logical rectangle for navigation. `page_tabs` divides it equally among visible pages, in declaration order. Empty area produces no tabs. |
+| `Snapshot::modal_root` | Optional current group key limiting widget input/focus to its subtree and preventing page changes. Its group/ancestors must be visible and enabled on an available active page. |
+| `Snapshot::key_bindings` | Unique key/modifier combinations targeting current button keys. Actual activation still checks current visibility, enablement and modal scope. |
+| `Snapshot::palette` | Owned RGB colors for background, surface, text, muted/accent/error tones, border, selection and disabled appearance. |
 | `WidgetKey::id` | Nonempty UTF-8 string, unique across the entire snapshot. |
 | `WidgetKey::generation` | Nonzero integer. An ID's replacement generation must be greater than any generation previously used for that ID in the adapter lifetime. |
 | `WidgetSpec` | Immutable while the same key survives. Change the generation to change its kind, binding, parent, page, or input policy. |
@@ -95,6 +105,17 @@ parents. Reordering must preserve surviving keys and their retained state.
 
 `MemoryAdapter` retains generation history for its lifetime. Generation exhaustion
 requires a fresh adapter lifetime; integer wrap does not authorize reuse.
+
+Shared `paint_order` places the modal subtree after background widgets while
+preserving declaration order within each part. Background can remain visible
+but is ineligible for input. Shared code must retain a usable dismissal route
+and restore appropriate focus; declaring modal scope is not a native-dialog API.
+Geometry/clipping can still make a valid declaration unusable, so shared layout
+must keep the intended modal content visible at supported client sizes.
+`MemoryAdapter` additionally stages a resolved-modal check during presentation
+and group scrolling: for a nonempty client, the root must retain visible,
+enabled clipped area. Failure preserves the previous retained state. A zero-area
+client is allowed temporarily, for example while a host is minimized.
 
 ## 4. Common presentation properties
 
@@ -141,8 +162,9 @@ descriptions and structured record `accessible_text` must be available to
 assistive technology. A meaningful accessible description is supplied by the
 shared application; it is not inferred from pixel bytes.
 
-Semantic tones are `normal`, `muted`, `accent`, and `error`. A native theme maps
-them consistently for labels, record cells, and captions. It must expose disabled
+Semantic tones are `normal`, `muted`, `accent`, and `error`. `tone_color` maps
+them to the shared palette's text/muted/accent/error RGB values. Renderers apply
+these consistently to labels, record cells and captions. They expose disabled
 state and keyboard focus visibly and through native accessibility APIs. A user
 must be able to understand status through text as well as color.
 
@@ -166,6 +188,7 @@ contain a borrowed toolkit pointer or mutable native item index.
 | `InvokeAction{id}` | Current enabled named action on an enabled, visible bitmap |
 | `PointerInput` | Explicitly opted-in control; finite position inside its effective clip; finite wheel values |
 | `PageEvent{id}` | Different visible, enabled declared page |
+| `ShortcutEvent{key, control, shift, alt}` | A declared key binding whose button remains eligible; normalized to its `WidgetEvent{Activate}` |
 | `ResizeEvent` | Finite bounded size and positive supported display scale |
 | `CloseEvent` | Live adapter lifetime |
 
@@ -175,8 +198,9 @@ advance before presentation. A delayed callback cannot make a hidden, disabled,
 removed, or replaced target eligible again.
 
 `normalize_event(snapshot, event, scroll_lookup)` implements these checks once
-for adapters and shared handlers. It returns acceptance and normalizes a declared
-select-and-activate interaction in place. `normalize_widget_event` is the same
+for adapters and shared handlers. It returns acceptance, resolves declared
+shortcuts, and normalizes select-and-activate interactions in place. Modal scope
+restricts eligible widget targets and rejects page changes. `normalize_widget_event` is the same
 operation for a widget event alone. The snapshot must already be validated;
 the lookup supplies current group offsets, or its omission means zero scrolling.
 These helpers do not dispatch or mutate the snapshot. The caller separately
@@ -245,10 +269,13 @@ reject carriage return and newline; multiline editors permit them. Validation
 rejects incomplete encoding, overlong encoding, invalid continuation bytes,
 surrogate values, and values beyond the Unicode range.
 
-An edit is evaluated as a complete proposed replacement. Validate the candidate
-before changing the native buffer, selection, undo history, or application value.
-Rejected candidates preserve the old state. Byte-identical replacements are
-silent. Whole replacements and selection replacements use the same policy.
+An edit is evaluated as a complete proposed replacement. Synchronous paths
+validate before committing the native buffer, selection or application value.
+An asynchronous browser editor may show provisional native input while waiting
+for authoritative acknowledgment, but must preserve newer pending input and
+reconcile rejected values. Rejected candidates do not change application state.
+Byte-identical replacements are silent. Whole replacements and selection
+replacements use the same shared policy.
 
 `TextSelection` carries anchor and caret offsets in UTF-8 bytes. Reversed
 selections are supported. Offsets clamp to the new length and then to a codepoint
@@ -320,7 +347,7 @@ The coordinate origin is the client area's top-left corner. Positive x moves
 right; positive y moves down. Rectangles are half open. All bounds are finite;
 the reference limits coordinates and extents to `coordinate_limit`. Display
 scale is greater than zero and at most 16. Other limits need an explicit revision
-of the boundary contract.
+of the boundary contract or a documented narrower backend profile.
 
 Group bounds are their outer viewport. `content_size` declares the scrollable
 content extent measured from the child viewport's top-left; it excludes padding.
@@ -393,6 +420,8 @@ a control's label.
 | `validate_snapshot` | Complete snapshot | Success or exception; no mutation |
 | `find_widget` | Snapshot, exact key | Borrowed pointer valid while that snapshot stays unchanged, or null |
 | `availability` | Snapshot, key, optional scroll lookup | Resolved bounds, clip, visibility, enablement |
+| `in_modal_scope` | Snapshot, exact key | Whether the key belongs to the active modal subtree; true when no modal is declared |
+| `page_tabs`, `paint_order`, `tone_color` | Shared snapshot or palette/tone | Shared navigation geometry, visual order, and RGB tone |
 | `normalize_event`, `normalize_widget_event` | Validated current snapshot, mutable event, optional scroll lookup | Acceptance boolean and declared activation normalization; no dispatch or model mutation |
 | `Adapter::present` | Owned snapshot | Create/update/remove retained presentation silently |
 | `Adapter::measure_text` | Owned literal text, font, wrap, available width, display scale | Finite logical text extents; no mutation or input |
@@ -412,6 +441,9 @@ a control's label.
 | `MemoryAdapter::choose_popup` | Key, displayed index | Simulated native choice; close popup, map stable ID, deliver input |
 | `MemoryAdapter::list_key` | List key, navigation/activation key | Simulated native list input; reveal and deliver eligible row |
 | `MemoryAdapter::repaint`, `MemoryAdapter::image` | Bitmap key | Render visible reference storage or inspect its committed CPU image |
+| `MemoryAdapter::sample_bitmap` | Bitmap key and explicit sample request | Owned sampled pixels under the normal producer guard and bitmap budget |
+| `MemoryAdapter::paint_ui` | Synchronous painter | Execute external UI drawing under the same no-mutation guard as a bitmap producer |
+| `MemoryAdapter::require_interaction` | None | Check creating thread, open lifetime and absence of paint/measurement reentry before changing renderer-owned interaction state |
 | `validate_font`, `validate_wrap`, `validate_measure_request` | Generic font, wrap, or metric request | Validate before invoking native text measurement |
 | `valid_utf8`, `text_error`, `replace_text` | Text and declared policy | Validation result or atomic replacement proposal |
 | `text_boundary`, `TextSelection::clamped`, `is_submit` | Encoding offsets or key modifiers | Shared editor boundary decisions |
@@ -441,6 +473,12 @@ producer scratch space, native resources, and nonpixel data are additional.
 A production adapter can use precise reconciliation and smaller staged updates
 while preserving the same observable behavior.
 
+Concrete renderers call `require_interaction` before changing additional popup,
+prompt or input state that is not stored by `MemoryAdapter`. This is a guard,
+not a second eligibility policy. `paint_ui` and `sample_bitmap` let renderers
+invoke external drawing/sampling callbacks under the same lifetime rules as
+ordinary retained bitmap painting. Guard state resets when a callback throws.
+
 ## 11. Text measurement through the boundary
 
 `TextMeasureRequest` owns literal UTF-8 `text`, `font`, `available_width`,
@@ -450,8 +488,8 @@ own leaf's presentation, creates this request, and calls `Adapter::measure_text`
 The returned `Size` is a finite, nonnegative logical extent bounded by
 `coordinate_limit`; it excludes application padding, borders, and scrollbars.
 
-The native adapter must use the font fallback, size, boldness, explicit line
-breaks, and wrapping used by native drawing. The supplied scale is explicit so
+The adapter's final metric result uses the font fallback, size, boldness,
+explicit line breaks, and wrapping used by its drawing profile. The supplied scale is explicit so
 initial layout and a newly received resize can be measured before `present`.
 Measure at zero width without division by zero or unbounded wrapping. The text
 engine may report intrinsic width greater than available width when wrapping
@@ -465,3 +503,45 @@ measurement throws a clear unsupported-operation error. Its guard rejects
 provider mutation or recursive measurement and resets after any exception.
 The demonstration runner supplies explicit fixture sizes; those sizes do not
 claim to model real glyphs.
+
+The browser profile uses provisional estimated metrics for the first shared
+layout and returns DOM measurements asynchronously. Request IDs and cache keys
+include text, font, width, wrapping and scale. Changed results trigger shared
+relayout; stale request IDs cannot overwrite the current cache. Pending input,
+focus and caret must survive older transport responses. This asynchronous
+profile does not promise exact browser glyph geometry before feedback arrives.
+
+## 12. Browser transport profile and limits
+
+Hosted and Wasm execution share `WebSession` and the same DOM renderer. Wire
+messages own their strings, row data and RGB pixel bytes. No `BitmapSource`
+callable, borrowed span, native pointer or mutable application object crosses
+JSON. The hosted process retains the source and copies completed pixels before
+serialization. Snapshot revision does not replace transport ordering.
+
+Every operation supplies its session epoch and next sequence number. Decimal
+strings preserve 64-bit identities in JavaScript. A consumed sequence is
+acknowledged even when its operation is rejected; duplicates do not execute
+again, gaps do not advance the acknowledgment, and a different epoch is rejected.
+An uncertain HTTP exchange retries the identical operation. It must not replay
+pending commands into a newly created session.
+
+The decoder accepts at most 1 MiB, 65,536 JSON values and 24 nested container
+levels; it rejects duplicate object keys, invalid UTF-8 and nonfinite numbers.
+Browser presentation permits at most 4,096 widgets, 4,096 pages, 4,096 key
+bindings, 65,536 records, 65,536 cells, 65,536 options/actions, 4 MiB of declared
+text/identity bytes, and 16 MiB of aggregate declared RGB bitmap storage. These
+are separate caps, not a single allocation limit. Temporary JSON strings,
+copies, DOM objects and native resources require additional storage.
+
+Browser resize operations cap each logical client dimension at 4,096; the
+shipped DOM host additionally caps its reported scale at 4. Metric cache and
+measurement batches are bounded to 512 requests. The browser transport queue
+holds at most 128 queued operations in addition to its in-flight operation;
+replaceable edits, pointer moves and resizes can coalesce before dispatch.
+Each coalesced operation retains at most 128 completion promises; further input
+is rejected before replacing the last accepted operation.
+Queue saturation reports a visible error. Failed bitmap production retains the
+previous delivered presentation and retries dirty work on a later response.
+Browser service titles, default values and declared reply limits each have a
+64 KiB profile cap; oversized requests complete with an explicit error.

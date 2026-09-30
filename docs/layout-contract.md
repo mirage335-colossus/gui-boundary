@@ -136,3 +136,34 @@ rectangle validation through outward rounding.
 Excess padding yields zero interior space; constrained widths and clipped areas never become negative.
 `flatten_layout` separately validates IDs, structural limits, and rectangle validity in an externally supplied `LayoutBox` tree.
 It does not prove that an externally constructed tree obeys the composition rules; use `compose_layout` for that guarantee.
+
+## Chrome, modality and renderer agreement
+
+`Snapshot.page_bar` is an explicit logical client rectangle. `page_tabs` divides
+it between visible pages, preserving order and selected identity. A zero-area
+bar draws no tabs. Backends use the resulting rectangles rather than adding a
+host-owned strip or subtracting a different height on resize.
+
+`Snapshot.modal_root` names a current group. Its subtree paints above background
+widgets through `paint_order`; input, focus and page changes are restricted by
+the shared eligibility rules. A modal's declared ancestors must remain enabled
+and visible on the active page. Retained group scrolling is checked before a
+presentation or scroll commits, so it cannot silently hide an active modal.
+A zero-sized minimized client is allowed and restores the retained view when
+resized. The application owns modal layout, show/dismiss actions and focus
+restoration; the example recomputes its modal bounds for small windows.
+
+`KeyBinding` maps an explicit key/modifier chord to a button activation. Shortcut
+events pass through the same current-generation, enabled, visible and modal
+checks as pointer/native activation. There are no label-derived hotkeys.
+
+`Snapshot.palette` provides semantic colors. `tone_color` resolves text tones;
+renderers map those colors to native color values, DOM CSS, terminal truecolor
+escapes or framebuffer RGB. Native metrics may differ, but only shared layout
+code decides widget placement. Text labels and structured cells use their
+published bounds and wrapping policy. Terminal projection rounds those bounds
+to cells; software pixels snap endpoints at the declared display scale.
+
+The extension test drives independently named controls and compares their final
+rectangles across adapters. It guards the architectural property that adding a
+feature does not require another backend-specific arrangement function.
