@@ -1,135 +1,147 @@
 # Generic GUI boundary
 
-A standalone C++20 example with one application and functioning native-widget,
-terminal, browser, WebAssembly, and software-framebuffer backends. No other
-application or repository is needed. Public headers use only the C++ standard
-library and this package's headers.
+A standalone C++20 example of keeping application features and layout behind a
+GUI abstraction. One application runs through native widgets, a terminal UI, a
+browser backed by a native process, browser-only WebAssembly, and a software
+framebuffer with an optional window host. Everything needed to study the example
+is in this repository; public headers depend only on the C++ standard library
+and this package's headers.
 
-[The application](examples/application.hpp) owns features, values, layout,
-structured rows, bitmap producers, modal views and shortcuts. It receives only
-`gui::Adapter&`. Adapters interpret opaque keys and a shared vocabulary; they
-never select behavior from application identifiers, labels or bindings.
+The central maintenance rule is simple: a feature expressed with the existing
+widget vocabulary is declared, laid out, and handled in shared application code.
+Adapters implement reusable presentation and input mechanics. They do not
+recognize application feature names or copy application decisions.
 
-## Build and run
+## What the example demonstrates
 
-The default build needs CMake 3.20+, a C++20 compiler and thread support. Python 3
-runs the browser host and additional tests; Node runs the DOM fixture tests.
-There are no automatic downloads.
+The **Boundary Workshop** application has a choice, an editable text field with
+suggestions, an enable toggle, an **Add row** button, an **Actions** menu, and a
+structured list on the left. A bitmap, caption, and **Show details** button occupy
+the right side. Page tabs sit at the bottom. Submitting the text field requests a
+host prompt; opening details demonstrates a modal composed from ordinary shared
+widgets.
 
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-./build/gui_example
-./build/gui_terminal
-./build/gui_framebuffer --output build/example.ppm
-python3 backends/web/host.py --executable build/gui_web_demo --port 8765
-```
+All backends consume those same declarations and logical rectangles. The layout,
+page placement, modal scope, colors, and feature behavior stay shared. Native
+font metrics, terminal cells, and the demonstration framebuffer font account for
+visible differences. See the [walkthrough](docs/running.md#try-the-same-features-in-each-interface)
+for a repeatable way to compare the interfaces.
 
-Open `http://127.0.0.1:8765/` for the browser. Each tab gets an independent C++
-process and transport epoch. The development host binds only to loopback.
-It is a local example host, not an Internet deployment server.
+## Start with a build that needs no GUI toolkit
 
-The terminal projects the **same logical rectangles** into 8×16 cells. Tab and
-Shift+Tab move focus, Enter/Space activate, arrows navigate lists/options,
-Alt+Down opens suggestions/actions, Ctrl+Tab changes pages, and Ctrl+Q quits.
-Mouse reporting and bracketed paste are supported. An 80×30 terminal shows the
-640×480 view; smaller terminals pan to focused controls. Text is treated as
-literal data, never terminal escape instructions.
+From this repository's root, use CMake 3.20 or newer, a C++20 compiler, and a build
+tool supported by your CMake generator. The compiler must provide thread support.
+Python 3 and Node enable additional checks; Python also runs the browser host.
+No dependencies are downloaded by the build.
 
-The dependency-free framebuffer runner produces a complete RGB frame and PPM
-file. For an interactive window, install the SDL2 development package:
+These commands use a single-configuration generator, such as Makefiles or Ninja:
 
 ```sh
-cmake -S . -B build -DGUI_BUILD_SDL=ON
-cmake --build build --parallel
-./build/gui_framebuffer_sdl
+cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+cmake --build build-core --parallel 2
+ctest --test-dir build-core --output-on-failure
+./build-core/gui_example
 ```
 
-For native widgets, install the FLTK development package (1.3+):
+`gui_example` runs scripted input through the reference adapter, prints the
+following, and exits. It does not open a window:
+
+```text
+Selected option: second
+Text: Updated text
+Rows: 1
+Bitmap: 160x160
+```
+
+To see an interactive interface immediately, run the terminal program in an
+interactive terminal, then press **Ctrl+Q** to exit:
 
 ```sh
-cmake -S . -B build -DGUI_BUILD_FLTK=ON
-cmake --build build --parallel
-./build/gui_fltk_demo
+./build-core/gui_terminal
 ```
 
-For WebAssembly, use an installed Emscripten toolchain. Both browser modes use
-the same renderer, protocol, C++ application and retained policy engine:
+Use at least **80 columns × 31 rows** to show the initial 640×480 logical view
+plus its status line. Smaller terminals pan to the focused control. **Tab** moves
+focus, **Ctrl+O** opens options, and **Ctrl+N/P** changes pages. The
+[terminal guide](docs/running.md#terminal-ui) lists the remaining keys and display
+constraints. Visual Studio and other multi-configuration generators need the
+[configuration-specific commands](docs/building.md#multi-configuration-generators).
 
-```sh
-emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-cmake --build build-wasm --parallel
-node tests/wasm_test.mjs build-wasm/gui_web_wasm.js
-python3 backends/web/host.py --wasm-dir build-wasm --port 8765
-```
+## Choose an interface
 
-Open `http://127.0.0.1:8765/?mode=wasm`. Add `--executable build/gui_web_demo`
-to that host command to serve both modes together. Multi-configuration build
-generators need `--config Debug` (or Release) and the matching executable path.
+Each command below starts a separate instance with its own in-memory state.
+Build the named profile before running it. Interactive programs and servers keep
+running until you close them; choose one row at a time.
 
-## Shared feature editing
+| Interface | Build and extra requirements | Run from the repository root |
+| --- | --- | --- |
+| Reference demonstration | Default build; no display | `./build-core/gui_example` |
+| Terminal UI | Default build; interactive terminal | `./build-core/gui_terminal` |
+| Framebuffer image | Default build; no display | `./build-core/gui_framebuffer --output build-core/example.ppm` |
+| Hosted browser | Default build; Python 3 and a POSIX host | `python3 backends/web/host.py --executable build-core/gui_web_demo --port 8765` |
+| Native widgets | [FLTK profile](docs/building.md#native-widgets-fltk); FLTK development files and display | `./build-fltk/gui_fltk_demo` |
+| Framebuffer window | [SDL profile](docs/building.md#framebuffer-window-sdl2); SDL2 development files and display | `./build-sdl/gui_framebuffer_sdl` |
+| Browser-only WebAssembly | [Wasm profile](docs/building.md#browser-only-webassembly); Emscripten, then Python for local serving | `python3 backends/web/host.py --wasm-dir build-wasm --port 8765` |
 
-For an ordinary new feature, change shared application declarations, shared
-layout, and event handling. New options, rows, validation, bitmap content,
-modal groups and bound actions use the existing contract. Backend source stays
-unchanged. [Extension tests](tests/extension_test.cpp) add a separate application
-feature after initial presentation, drive it through four adapter families, and
-compare normalized intentions and resulting geometry. The
-[architecture check](tests/architecture_test.py) guards dependency direction and
-literal feature-ID branching; it also verifies that injected violations fail.
+For a browser interface, keep the server terminal open and open its printed
+`http://127.0.0.1:8765/` URL, including `?mode=wasm` when serving Wasm. Stop the
+server with **Ctrl+C**. The hosted mode starts an independent native C++ process
+per tab; Wasm executes C++ inside the browser. Both use the same DOM renderer.
+The supplied server is a loopback development host. Its subprocess mode uses
+POSIX pipe polling; it is not a Windows hosting implementation.
 
-`MemoryAdapter` centralizes validation, generations, input normalization, focus,
-list policy, retained state and guarded bitmap sampling. `InteractiveAdapter`
-centralizes physical keyboard/pointer editing, popup and prompt behavior for
-terminal and framebuffer renderers. Native toolkit and DOM adapters translate
-their controls into the same semantic events. Page geometry, modal ordering,
-semantic colors, clipping, and application layout remain shared.
+## Where application changes belong
 
-This guarantees a concrete extension path for the documented vocabulary. A new
-primitive outside that vocabulary still needs a contract and generic adapter
-support. Backend code necessarily differs where it draws glyphs, integrates
-native controls, transports bytes or calls host services.
+Start with [`examples/application.hpp`](examples/application.hpp). Its constructor
+declares widgets, `publish()` computes layout and derived state, and `handle()`
+interprets semantic events. It receives only `gui::Adapter&`. For example,
+**Add row** produces an `Activate` event, the shared handler constructs a record
+from the editor's value, and a new snapshot updates every renderer through the
+same interface.
 
-## Verification
+The [worked feature exercise](docs/feature-recipes.md) walks through adding a
+control in shared code. This is also where changes to options, validation,
+structured rows, bitmap content, shortcuts, and composed dialogs belong. The
+boundary uses opaque widget keys and stable option/record IDs, so adapters need
+no feature-specific branches.
 
-The default CTest suite includes policy, lifetime, rollback, interaction,
-geometry, bitmap sampling, extension and dependency checks. Every public header
-and the shared application also compile independently of native toolkits.
+| Layer | Responsibility and starting point |
+| --- | --- |
+| Shared application | Feature declarations, decisions, and geometry in [`application.hpp`](examples/application.hpp) |
+| Public vocabulary | Snapshots, widget values, events, and `Adapter` in [`contract.hpp`](include/gui/contract.hpp); layout, text, bitmap, and runtime headers alongside it |
+| Shared retained policy | Validation, generations, event normalization, focus, lists, and bitmap sampling in [`memory_adapter.hpp`](include/gui/memory_adapter.hpp), reused through [`retained_adapter.hpp`](include/gui/retained_adapter.hpp) |
+| Shared software interaction | Keyboard/pointer editing, popups, and prompts for terminal and framebuffer in [`interaction.hpp`](include/gui/interaction.hpp) |
+| Renderers and hosts | Native controls, terminal bytes, DOM/protocol transport, pixels, and event loops under [`backends/`](backends/) and the concrete adapter headers in [`include/gui/`](include/gui/) |
 
-Enable tests that use a PTY, loopback socket or native display explicitly:
+This extension path covers the documented vocabulary. A new primitive or host
+capability requires a contract extension and generic adapter support. Drawing
+glyphs, translating native events, and executing host services remain backend
+responsibilities. The [adapter guide](docs/adapter-guide.md) explains that division
+and the [boundary audit](docs/audit.md) records its scope.
 
-```sh
-cmake -S . -B build -DGUI_TEST_HOSTS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
+## Build, operate, and verify
 
-With FLTK enabled, run the last command under a display, for example
-`xvfb-run -a ctest --test-dir build --output-on-failure` on Linux. The SDL test
-uses its dummy video driver and injects real SDL events. The PTY test checks
-input, resize, signal cleanup and output backpressure. Browser fixture tests
-complement real-browser checks; see [coverage](docs/conformance.md).
+- [Building](docs/building.md): prerequisites, separate CMake profiles, dependency
+  discovery, Wasm output, configuration caching, and build failures.
+- [Running](docs/running.md): what each executable does, controls, expected
+  results, browser sessions, and troubleshooting.
+- [Conformance and coverage](docs/conformance.md): test registration, host/display
+  requirements, manual scenarios, and recorded platform validation.
+- [Feature recipes](docs/feature-recipes.md): a complete shared-code edit and
+  recipes for identity, rows, modals, measurement, pixels, and services.
 
-## Profiles and contracts
+The contract references cover [widgets](docs/specification.md),
+[layout and presentation](docs/layout-contract.md),
+[bitmaps](docs/bitmap-contract.md), and [runtime/services](docs/runtime-contract.md).
+The default tests exercise the boundary without a GUI toolkit. Host tests add
+real PTY, socket/process, SDL, and FLTK paths when their prerequisites are enabled.
+Public-header and application isolation checks run during compilation.
 
-Layouts share coordinates, ordering and palette. Terminal cell rounding and
-native font metrics can produce small size differences. The default framebuffer
-font is a small ASCII demonstration font; other Unicode characters show a
-fallback glyph while their UTF-8 values remain intact. A paired text measurement
-and raster provider can replace that font without changing application code.
-Native/DOM text and accessibility depend on their host. The software profiles do
-not supply an OS accessibility or IME engine.
-
-All interactive profiles implement prompts. Unsupported host services return
-explicit errors; service queues, cancellation and completion identity are shared.
-Platform limits and tested coverage are recorded rather than disguised as
-successful operations.
-
-- [Widget specification](docs/specification.md)
-- [Bitmap contract](docs/bitmap-contract.md)
-- [Layout and presentation](docs/layout-contract.md)
-- [Runtime and services](docs/runtime-contract.md)
-- [Adapter implementation guide](docs/adapter-guide.md)
-- [Feature recipes](docs/feature-recipes.md)
-- [Boundary audit](docs/audit.md)
+The profiles have explicit limits: terminal output escapes non-ASCII characters
+while retaining UTF-8 values, the default framebuffer font shows fallback glyphs
+for unsupported characters, and software profiles do not provide an OS
+accessibility or IME engine. Interactive profiles implement prompts; other host
+services vary by profile and report errors when unavailable. See
+[backend profiles](docs/conformance.md#backend-profiles) before treating a passing
+test suite as qualification for a particular platform or assistive technology.

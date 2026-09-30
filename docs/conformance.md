@@ -3,7 +3,127 @@
 The package includes executable shared semantics and functioning backend hosts.
 A passing model test is useful evidence about policy; it is not evidence that a
 particular operating system, browser, terminal, accessibility stack, or GPU has
-been qualified. Build and run commands are in the [README](../README.md).
+been qualified. Use the [build guide](building.md) to prepare a profile and the
+[running guide](running.md) to exercise its visible applications. This guide
+explains which checks that profile enables and what their results establish.
+
+## Run and inspect a test profile
+
+The build guide uses separate directories so optional toolkit settings do not
+silently carry over from an earlier CMake configuration. After configuring the
+portable `build-core` profile with `BUILD_TESTING=ON`, build the default target
+and inspect the registered tests before running them:
+
+```sh
+cmake --build build-core --parallel 2
+ctest --test-dir build-core -N
+ctest --test-dir build-core --output-on-failure
+```
+
+`ctest -N` lists the tests without running them. It does not build missing test
+executables. Building only `gui_example` is insufficient: the default build also
+compiles test executables, each public header in isolation, and the shared
+application without a concrete backend. The two compilation checks do not
+appear in the CTest list. C++ test assertions remain enabled in Release builds.
+
+For a multi-configuration generator, build with `--config Debug` and add
+`-C Debug` to each CTest command. Use the same configuration for both steps.
+
+### Understand the inventory
+
+`BUILD_TESTING` defaults to `ON`. With it disabled, the native build registers no
+tests and omits the header/application compilation checks. With it enabled,
+registration follows these conditions:
+
+| Profile or prerequisite | Registered CTest checks |
+| --- | --- |
+| Native build, no optional dependencies | `contract`, `bitmap`, `runtime`, `layout`, `adapter`, `application`, `interaction`, `framebuffer`, `terminal`, `web`, `presentation`, `extension`, `example`, `framebuffer_host` |
+| Node executable found at configure time | Adds `web_renderer` |
+| Python 3 interpreter found at configure time | Adds `architecture` |
+| Python 3 and `GUI_TEST_HOSTS=ON` | Adds `web_host`; also adds `terminal_pty` on Unix |
+| `GUI_BUILD_SDL=ON` | Adds `framebuffer_sdl`, including when `GUI_TEST_HOSTS=OFF` |
+| `GUI_BUILD_FLTK=ON` | Builds `fltk_test`; registers `fltk` only with `GUI_TEST_HOSTS=ON` |
+| Emscripten build and Node executable found | Registers only `wasm`; native targets and checks are not part of this profile |
+
+Thus a native build has 14 baseline checks, or 16 with both Python and Node. A
+Unix build with both interpreters, both optional toolkits and host tests enabled
+has 20. Counts are a quick sanity check; the names from `ctest -N` are the actual
+inventory. A successful run of 14 checks does not establish that the Python or
+JavaScript checks passed. Missing optional interpreters omit their checks rather
+than producing a CTest failure or a visible skipped result. Reconfigure after
+making a missing dependency available, and report any omitted checks explicitly.
+
+### Include real hosts
+
+Configure and build the `build-all` profile in the [build guide](building.md).
+It enables `GUI_BUILD_FLTK`, `GUI_BUILD_SDL`, `GUI_TEST_HOSTS` and testing in a
+separate directory. On Linux, the FLTK test needs an accessible X display and
+its authorization. With a usable desktop display, run:
+
+```sh
+ctest --test-dir build-all -N
+ctest --test-dir build-all --output-on-failure
+```
+
+On a machine without a desktop display, an installed Xvfb and `xvfb-run` can
+provide a temporary display for the same suite:
+
+```sh
+xvfb-run -a ctest --test-dir build-all --output-on-failure
+```
+
+CTest sets `SDL_VIDEODRIVER=dummy` for `framebuffer_sdl` automatically. That check
+exercises SDL events, prompt handling, resizing and texture upload without a
+visible window; it does not establish that a particular graphics driver renders
+correctly. Run `gui_framebuffer_sdl` interactively for that evidence.
+
+The `web_host` check opens loopback sockets and starts real application
+subprocesses; it requires a host environment that permits both operations. The
+`terminal_pty` check opens a Unix pseudo-terminal and starts the terminal host;
+it does not require an interactive terminal attached to CTest. A sandbox that
+blocks sockets or PTYs cannot provide those integration results. FLTK display
+failures likewise require a usable display, not a change to the shared model.
+
+### Check the compiled browser module
+
+Use the separate Emscripten `build-wasm` profile from the build guide with
+`BUILD_TESTING=ON` and Node available when configuring. After building it, run:
+
+```sh
+ctest --test-dir build-wasm -N
+ctest --test-dir build-wasm --output-on-failure
+```
+
+The expected inventory is the single `wasm` check. If the module was built with
+testing disabled, the same check can also be invoked directly:
+
+```sh
+node tests/wasm_test.mjs build-wasm/gui_web_wasm.js
+```
+
+Keep the generated `.js`, `.wasm` and `package.json` together. The test loads the
+compiled module in Node, so a native `web` test or a JavaScript renderer test is
+not a substitute. The [running guide](running.md) describes serving the same
+module in a browser; exercise that path as well when changing browser behavior.
+
+### Rerun relevant checks while editing
+
+Use CTest's regular-expression filter to shorten a feedback cycle, then run the
+appropriate complete profile before reporting its result. For example:
+
+```sh
+# Shared feature, declaration, or boundary changes.
+ctest --test-dir build-core --output-on-failure -R '^(contract|adapter|application|presentation|extension|architecture)$'
+
+# Browser protocol, DOM renderer, and real hosted-process integration.
+ctest --test-dir build-all --output-on-failure -R '^(web|web_renderer|web_host)$'
+```
+
+A filter selects only tests already registered in that build directory. Confirm
+the inventory first; a filter mentioning `web_host` does not enable host tests.
+Rebuild after source changes, and run the Wasm profile separately after changes
+to shared browser or application code. For visual, focus, input-method or
+platform integration changes, also perform the relevant manual scenarios below.
 
 ## Automated check inventory
 
@@ -87,12 +207,17 @@ kind in the public vocabulary alone does not establish that every host implement
 it. Never represent simulated input, a successful compile, or a headless memory
 adapter as completed native platform qualification.
 
-## Validation record
+## Previous implementation validation
+
+The following is a historical record of the implementation validation. It is
+not a claim that tests were rerun for every later checkout or documentation
+change. Use the commands above to establish results for the revision and
+environment being evaluated.
 
 The implementation was checked on Linux with GCC 14.2, FLTK 1.3, SDL2,
 Python 3.13, Node 20 and Emscripten 3.1.69:
 
-- All 20 configured integration tests passed, including real PTY, loopback
+- All 20 configured checks passed, including real PTY, loopback
   subprocess hosting, SDL event injection and FLTK on a private Xvfb display.
 - A separate Release build with native toolkit options disabled passed all 16
   default tests. Assertions remain enabled in test targets in Release builds.

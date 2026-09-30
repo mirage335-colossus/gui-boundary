@@ -19,7 +19,111 @@ working reference; the [adapter guide](adapter-guide.md) explains host duties.
 | Add a new UI host | Implement the existing adapter profile | Host/rendering work, no application feature copy |
 | Add a new primitive, input model or service | Public vocabulary and shared semantics first | Explicit support/profile work in every applicable backend |
 
+## Follow an action through the source
+
+Start with the constructor in [application.hpp](../examples/application.hpp): it
+declares controls and initial values. `Example::publish()` derives availability,
+measures text through `Adapter::measure_text`, computes shared rectangles and
+calls `Adapter::present`. Read the value types and interface in
+[contract.hpp](../include/gui/contract.hpp) alongside that code.
+
+For input, follow the existing **Add row** button. A native control callback or
+the shared software interaction engine produces `WidgetEvent{key, Activate{}}`.
+[MemoryAdapter::send](../include/gui/memory_adapter.hpp) checks the event against
+the retained presentation. The composition root's event sink passes it to
+`Example::handle`, which checks it against authoritative application state,
+appends a record in `add_row()`, and calls `publish()` again. The backend renders
+the resulting records and rectangles without knowing what adding a row means.
+
+The small [terminal host](../backends/terminal/main.cpp) shows how an adapter,
+event sink, application and progress loop are connected. The
+[adapter guide](adapter-guide.md) explains renderer and host responsibilities;
+[extension_test.cpp](../tests/extension_test.cpp) shows a separate feature using
+the same boundary across multiple adapter families.
+
+## Worked change: add a Reset text button
+
+This exercise adds a button below the editor. It restores `Example text` and is
+disabled when the editor already contains that value. Make all four edits in
+[examples/application.hpp](../examples/application.hpp); the steps below use
+source landmarks so they remain useful when line numbers move.
+
+1. In `Example`'s constructor, immediately **after** the assignment to
+   `editor.state.options` and before the existing `add("toggle", ...)` call,
+   declare the button:
+
+   ```cpp
+   add("reset-editor", gui::Kind::button, {}, "panel").state.label = "Reset text";
+   ```
+
+   The existing `add` helper sets its page and initial generation. Finish setting
+   `editor` before adding another widget: adding to the widget vector can
+   invalidate references to earlier elements.
+
+2. In `publish()`, replace the control-ID list in the loop that builds
+   `panel.children` with this list. Keep the loop body unchanged:
+
+   ```cpp
+   for (const auto* id : {"heading", "choice", "editor", "reset-editor",
+                          "toggle", "button", "menu", "list"}) {
+       gui::LayoutNode child;
+       child.id = id;
+       if (child.id != "heading") child.height = child.id == "list" ? 112 : 28;
+       panel.children.push_back(std::move(child));
+   }
+   ```
+
+   The shared column now allocates the new button a 28-unit height and moves
+   following controls down. Terminal cell projection, native widgets, DOM
+   elements and framebuffer pixels all receive those same logical rectangles.
+
+3. In `handle()`, inside the `gui::Activate` branch, replace the final
+   `} else add_row();` with:
+
+   ```cpp
+   } else if (w.spec.key.id == "reset-editor") {
+       get("editor").state.text = "Example text";
+   } else add_row();
+   ```
+
+   This feature-ID decision belongs in the application. The adapter continues
+   to emit the existing generic button event. Do not call `publish()` inside
+   this branch: `handle()` already publishes once after the event visitor.
+
+4. In `publish()`, immediately after the existing assignment to
+   `lookup(next,"button").state.enabled` and before `++next.revision`, derive the
+   new button's availability:
+
+   ```cpp
+   lookup(next, "reset-editor").state.enabled =
+       lookup(next, "editor").state.text != "Example text";
+   ```
+
+   This is derived from authoritative text on every presentation. Editing,
+   choosing a suggestion or activating Reset text follows the same update path.
+   Focus order and rejection of disabled activation come from shared policy.
+
+Rebuild each configured backend using the commands in the [build guide](building.md)
+and rerun its tests. In an interactive host, verify that Reset text starts
+disabled; edit the text and it becomes enabled; activate it and the original
+text returns while the button becomes disabled again. Also use Add row to check
+that its existing behavior still works, and open Show details to check that the
+new background button is unavailable during the modal. Repeat in another
+backend. The file-output framebuffer host shows the initial declaration but
+requires its SDL host for this interactive exercise.
+
+The supplied tests do not automatically prove the behavior of your new feature.
+Add shared application assertions for its initial disabled state, edited state,
+successful reset and rejection of a second activation while disabled. A layout
+assertion can check that the editor precedes the new button and the toggle
+follows it. Keep feature-specific assertions in application/extension tests;
+renderer tests exercise generic button and layout mechanics.
+
 ## Declare and update a widget
+
+The fragments below use types from `#include "gui/contract.hpp"` and assume an
+existing `gui::Adapter& adapter` on its owning UI thread. This first fragment
+creates its own presentation; it is independent of the worked change above.
 
 ```cpp
 gui::Snapshot view;
@@ -69,6 +173,11 @@ host-service mechanism, with their own request and completion IDs.
 
 ## Focus, selection, scrolling and popups
 
+Here `editor_key`, `group_key` and `bitmap_key` are exact keys from the current
+presentation; `editor_text` is the application's current editor value. The group
+declares scrollable content, and the bitmap declares actions. Inspect the query
+results to decide whether the requested operation is available.
+
 ```cpp
 if (adapter.focus(editor_key))
     adapter.text_selection(editor_key, {0, editor_text.size()});
@@ -102,6 +211,8 @@ The application can relayout through the same shared path after that feedback.
 
 ## Produce pixels
 
+Continuing with an owned `view` and its adapter, add a bitmap declaration:
+
 ```cpp
 gui::Widget image;
 image.spec.key = {"image-area", 1};
@@ -116,9 +227,16 @@ adapter.invalidate(image.spec.key, {0, 0, 8, 8});
 
 Sources own immutable captured data. Change source ID or revision when content
 changes. Damage restricts output, not the producer's full coordinate grid.
-`image_bitmap` requires an exactly matching grid; scalable producers such as
-`solid_bitmap` can handle arbitrary requested grids. `pixel_at` maps logical
-pointer positions to the full bitmap even when clipped.
+`image_bitmap` requires an exactly matching grid by default. A backend can request
+`fit_content` to fit and center that image in a different physical sample grid,
+using nearest-neighbor sampling and black letterboxing; `sample_aspect_ratio`
+accounts for non-square cells. The terminal uses that shared fitting path.
+Declare `BitmapSampling::discrete` and a minimum extent when reducing detail
+would misrepresent the image, so the terminal can show an explicit insufficient
+space indicator. Scalable producers such as `solid_bitmap` accept arbitrary
+requested grids. `pixel_at` maps logical pointer positions to the full bitmap
+even when clipped. See the [sampling profile](bitmap-contract.md) for the exact
+request and damage rules.
 
 The complete framebuffer is a different boundary: a host consumes an immutable
 full UI `Frame`, forwards input and uploads pixels. It does not receive or invoke
