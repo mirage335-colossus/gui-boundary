@@ -5,6 +5,29 @@ uses separate build directories so choosing an optional backend cannot silently
 change another profile. After building, use the [running guide](running.md) to
 launch an interface and the [coverage guide](conformance.md) to choose checks.
 
+## Which build produces which output
+
+Configure **and** build the selected profile before using its run command. The
+Python browser host serves existing outputs; it does not compile them. All paths
+below assume a single-configuration generator.
+
+| Interface | Configure/build recipe | CMake target | Output used to run it |
+| --- | --- | --- | --- |
+| Reference demonstration | [Default profile](#default-profile) | `gui_example` | `build-core/gui_example` |
+| Terminal UI | [Default profile](#default-profile) | `gui_terminal` | `build-core/gui_terminal` |
+| Framebuffer image | [Default profile](#default-profile) | `gui_framebuffer` | `build-core/gui_framebuffer` |
+| Hosted web | [Hosted web profile](#hosted-web-native-process) (same core build) | `gui_web_demo` | `build-core/gui_web_demo`, passed to `host.py --executable` |
+| FLTK native widgets | [FLTK profile](#native-widgets-fltk), `GUI_BUILD_FLTK=ON` | `gui_fltk_demo` | `build-fltk/gui_fltk_demo` |
+| SDL2 framebuffer window | [SDL profile](#framebuffer-window-sdl2), `GUI_BUILD_SDL=ON` | `gui_framebuffer_sdl` | `build-sdl/gui_framebuffer_sdl` |
+| Wasm web | [Emscripten profile](#browser-only-webassembly) | `gui_web_wasm` | `build-wasm/gui_web_wasm.js` and `.wasm`, served with `host.py --wasm-dir build-wasm` |
+| Rev | Not implemented | None | No Rev adapter, option, or executable is included |
+
+The FLTK and SDL profiles also build the four core executables in their own
+build directories. The [all-native profile](#all-native-backends-and-host-checks)
+builds all six native application executables under `build-all/`; use that prefix
+when running them. It does not produce Wasm or Rev. The Emscripten profile builds
+only the browser module and requires its own build directory.
+
 ## Prerequisites
 
 | Requirement | Needed for | How the build uses it |
@@ -47,6 +70,24 @@ speaks a line-oriented protocol; launch it through the Python host to get a UI.
 Compilation also checks every public header and the shared application without
 toolkit includes. Increase `--parallel 2` if your machine has sufficient memory;
 use `--parallel 1` if compiler processes are being killed for memory pressure.
+
+## Hosted web (native process)
+
+Hosted web is included in the default profile. If `build-core/gui_web_demo`
+already exists from that build, skip the following commands and
+[start the Python host](running.md#hosted-c):
+
+```sh
+cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+cmake --build build-core --parallel 2
+```
+
+The result is a native executable, `build-core/gui_web_demo`. Python 3 supplies
+the HTTP/process host on POSIX; neither Emscripten nor a desktop GUI toolkit is
+needed. Browser JavaScript/CSS assets are served from `backends/web/` and need no
+separate build or package installation. This profile does not produce the Wasm
+module; use its [separate recipe](#browser-only-webassembly) for that mode.
 
 ## Native widgets (FLTK)
 

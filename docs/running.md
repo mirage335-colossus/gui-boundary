@@ -50,7 +50,7 @@ one, follow the [shared-code feature exercise](feature-recipes.md).
 This is a display-free scripted demonstration, useful for verifying the build
 and tracing semantic input. It prints the selected option, editor text, row
 count, and bitmap dimensions, then exits successfully. Expected output is in
-the [README](../README.md#start-with-a-build-that-needs-no-gui-toolkit).
+the [README](../README.md#build-the-core-binaries-tui-hosted-web-and-framebuffer-image).
 Its synthetic text measurements are fixture data, not native font measurements.
 
 ## Terminal UI

@@ -27,14 +27,17 @@ font metrics, terminal cells, and the demonstration framebuffer font account for
 visible differences. See the [walkthrough](docs/running.md#try-the-same-features-in-each-interface)
 for a repeatable way to compare the interfaces.
 
-## Start with a build that needs no GUI toolkit
+## Build the core binaries: TUI, hosted web, and framebuffer image
 
 From this repository's root, use CMake 3.20 or newer, a C++20 compiler, and a build
 tool supported by your CMake generator. The compiler must provide thread support.
 Python 3 and Node enable additional checks; Python also runs the browser host.
 No dependencies are downloaded by the build.
 
-These commands use a single-configuration generator, such as Makefiles or Ninja:
+These commands use a single-configuration generator, such as Makefiles or Ninja.
+They build `gui_example`, `gui_terminal`, `gui_web_demo`, and `gui_framebuffer`,
+plus their tests. **They do not build FLTK, SDL, or Wasm.** Those build commands
+are in the next section. Rev is not implemented in this standalone example.
 
 ```sh
 cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
@@ -68,28 +71,101 @@ focus, **Ctrl+O** opens options, and **Ctrl+N/P** changes pages. The
 constraints. Visual Studio and other multi-configuration generators need the
 [configuration-specific commands](docs/building.md#multi-configuration-generators).
 
-## Choose an interface
+## Build and run each backend
 
-Each command below starts a separate instance with its own in-memory state.
-Build the named profile before running it. Interactive programs and servers keep
-running until you close them; choose one row at a time.
+Run the selected block from the repository root. Each block includes its own
+configure and build commands before launching the matching binary or server;
+the FLTK, SDL, and Wasm blocks do not require the core build first. Each launch
+starts separate in-memory application state. Interactive programs and servers
+keep running until closed.
 
-| Interface | Build and extra requirements | Run from the repository root |
+### FLTK native widgets
+
+Requires FLTK development headers/libraries and a desktop display. This enables
+`GUI_BUILD_FLTK` and produces **`build-fltk/gui_fltk_demo`**:
+
+```sh
+cmake -S . -B build-fltk -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+  -DGUI_BUILD_FLTK=ON -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+cmake --build build-fltk --parallel 2
+./build-fltk/gui_fltk_demo
+```
+
+Close the window to exit. See [FLTK build details](docs/building.md#native-widgets-fltk)
+for dependency discovery and display tests.
+
+### SDL2 framebuffer window
+
+Requires SDL2 development files, including its CMake package, and a desktop
+display. This enables `GUI_BUILD_SDL` and produces
+**`build-sdl/gui_framebuffer_sdl`**:
+
+```sh
+cmake -S . -B build-sdl -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=ON -DGUI_TEST_HOSTS=OFF
+cmake --build build-sdl --parallel 2
+./build-sdl/gui_framebuffer_sdl
+```
+
+Close the window or press Ctrl+Q to exit. See
+[SDL build details](docs/building.md#framebuffer-window-sdl2) for its display-free
+self-test. The core `gui_framebuffer` executable only writes an image; it does
+not open this SDL window.
+
+### Hosted web: native C++ process with browser UI
+
+Requires the native compiler and Python 3 on a POSIX host. The core build already
+produces **`build-core/gui_web_demo`**; if you completed it above, run only the
+last command. Otherwise, this block builds it:
+
+```sh
+cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+cmake --build build-core --parallel 2
+python3 backends/web/host.py --executable build-core/gui_web_demo --port 8765
+```
+
+Open `http://127.0.0.1:8765/`. Python starts an independent native C++ process per
+tab. It does not build the executable; the preceding CMake commands do that.
+Keep the server terminal open and stop it with Ctrl+C. The supplied server is a
+loopback development host using POSIX pipe polling.
+
+### Wasm web: C++ executes inside the browser
+
+Requires an activated Emscripten toolchain for compilation and Python 3 for local
+serving. This is a separate toolchain build producing
+**`build-wasm/gui_web_wasm.js`** and **`build-wasm/gui_web_wasm.wasm`**:
+
+```sh
+emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build-wasm --parallel 2
+python3 backends/web/host.py --wasm-dir build-wasm --port 8765
+```
+
+Open `http://127.0.0.1:8765/?mode=wasm`. Python serves the generated files; no
+native C++ worker runs in this mode. Stop the server with Ctrl+C. This mode and
+hosted web share the DOM renderer, but building one does not build the other's
+C++ output. See [Wasm build details](docs/building.md#browser-only-webassembly)
+for the compiled-module test and
+[serving both modes together](docs/running.md#serve-both-modes-and-manage-sessions).
+Stop an existing server before reusing port 8765, or choose another `--port`.
+
+### TUI and framebuffer image
+
+Both are built by the [core commands above](#build-the-core-binaries-tui-hosted-web-and-framebuffer-image).
+No FLTK or SDL development files are required. Choose the program to run:
+
+| Interface | Built executable | Run from the repository root |
 | --- | --- | --- |
-| Reference demonstration | Default build; no display | `./build-core/gui_example` |
-| Terminal UI | Default build; interactive terminal | `./build-core/gui_terminal` |
-| Framebuffer image | Default build; no display | `./build-core/gui_framebuffer --output build-core/example.ppm` |
-| Hosted browser | Default build; Python 3 and a POSIX host | `python3 backends/web/host.py --executable build-core/gui_web_demo --port 8765` |
-| Native widgets | [FLTK profile](docs/building.md#native-widgets-fltk); FLTK development files and display | `./build-fltk/gui_fltk_demo` |
-| Framebuffer window | [SDL profile](docs/building.md#framebuffer-window-sdl2); SDL2 development files and display | `./build-sdl/gui_framebuffer_sdl` |
-| Browser-only WebAssembly | [Wasm profile](docs/building.md#browser-only-webassembly); Emscripten, then Python for local serving | `python3 backends/web/host.py --wasm-dir build-wasm --port 8765` |
+| Terminal UI | `build-core/gui_terminal` | `./build-core/gui_terminal` (Ctrl+Q exits) |
+| Framebuffer image | `build-core/gui_framebuffer` | `./build-core/gui_framebuffer --output build-core/example.ppm` (writes a file and exits) |
 
-For a browser interface, keep the server terminal open and open its printed
-`http://127.0.0.1:8765/` URL, including `?mode=wasm` when serving Wasm. Stop the
-server with **Ctrl+C**. The hosted mode starts an independent native C++ process
-per tab; Wasm executes C++ inside the browser. Both use the same DOM renderer.
-The supplied server is a loopback development host. Its subprocess mode uses
-POSIX pipe polling; it is not a Windows hosting implementation.
+### Rev
+
+This example currently has **no Rev adapter, CMake option, or executable**.
+There is no Rev build/run command to use here; supporting it requires adding a
+generic adapter and host. The supported build targets are listed in the
+[build-output reference](docs/building.md#which-build-produces-which-output).
 
 ## Where application changes belong
 
