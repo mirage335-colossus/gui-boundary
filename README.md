@@ -7,12 +7,33 @@ framebuffer with an optional window host. Everything needed to study the example
 is in this repository; public headers depend only on the C++ standard library
 and this package's headers.
 
+## One application, seven backends
+
+The same features and shared layout, running in native windows, a browser, and a
+terminal. Click a screenshot to see it at full size.
+
+| [FLTK](#fltk-native-widgets) | [Rev](#rev-native-widgets) |
+| --- | --- |
+| [<img src="docs/screenshots/fltk.png" alt="FLTK native GUI" width="400">](docs/screenshots/fltk.png) | [<img src="docs/screenshots/rev.png" alt="Rev native GUI" width="400">](docs/screenshots/rev.png) |
+| **[SDL2 window](#sdl2-framebuffer-window)** | **[Software framebuffer](#tui-and-framebuffer-image)** |
+| [<img src="docs/screenshots/sdl.png" alt="SDL2 window displaying the shared framebuffer" width="400">](docs/screenshots/sdl.png) | [<img src="docs/screenshots/framebuffer.png" alt="Software framebuffer rendering" width="400">](docs/screenshots/framebuffer.png) |
+| **[Hosted web](#hosted-web-native-c-process-with-browser-ui)** | **[Browser-only WebAssembly](#wasm-web-c-executes-inside-the-browser)** |
+| [<img src="docs/screenshots/web-hosted.png" alt="Hosted web GUI backed by native C++" width="400">](docs/screenshots/web-hosted.png) | [<img src="docs/screenshots/web-wasm.png" alt="WebAssembly GUI running in the browser" width="400">](docs/screenshots/web-wasm.png) |
+
+**[Terminal UI](#tui-and-framebuffer-image)**
+
+[<img src="docs/screenshots/tui.png" alt="Terminal UI in an 80-column terminal" width="640">](docs/screenshots/tui.png)
+
+Static copies from the [screenshot release](https://github.com/mirage335-colossus/gui-boundary/releases/tag/screenshots-2026-09-30-fonts),
+with [build provenance and image checksums](docs/screenshots/BUILD.txt).
+[Try a backend](#build-and-run-each-backend) or [build the toolkit-free core](#build-the-core-binaries-tui-hosted-web-and-framebuffer-image).
+
+## What the example demonstrates
+
 The central maintenance rule is simple: a feature expressed with the existing
 widget vocabulary is declared, laid out, and handled in shared application code.
 Adapters implement reusable presentation and input mechanics. They do not
 recognize application feature names or copy application decisions.
-
-## What the example demonstrates
 
 The **Boundary Workshop** application has a choice, an editable text field with
 suggestions, an enable toggle, an **Add row** button, an **Actions** menu, and a

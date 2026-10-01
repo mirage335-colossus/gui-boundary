@@ -123,3 +123,24 @@ Use a new tag for a subsequent capture. Inspect the manual preview before
 publishing when changing the capture process or visual layout. The workflow
 file is [`.github/workflows/screenshots.yml`](../.github/workflows/screenshots.yml)
 and the shared implementation is [`tools/screenshots.py`](../tools/screenshots.py).
+
+## README gallery
+
+The README displays committed copies of all seven PNGs in
+[`docs/screenshots/`](screenshots/), together with the release's unmodified
+[`BUILD.txt`](screenshots/BUILD.txt). The current gallery is from
+[`screenshots-2026-09-30-fonts`](https://github.com/mirage335-colossus/gui-boundary/releases/tag/screenshots-2026-09-30-fonts).
+Images load from the repository and remain available in an offline checkout.
+
+To refresh the gallery after publishing a new screenshot release, download its
+assets from the repository root, replacing the tag below with the new tag:
+
+```sh
+gh release download screenshots-2026-09-30-fonts \
+  --repo mirage335-colossus/gui-boundary \
+  --dir docs/screenshots --pattern '*.png' --pattern BUILD.txt --clobber
+```
+
+Review the images and their checksums, update the release links here and in the
+README, and commit the PNGs and `BUILD.txt` together. The release workflow leaves
+this static gallery unchanged until it is explicitly refreshed.

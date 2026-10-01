@@ -1,0 +1,40 @@
+GUI boundary backend screenshots
+Commit: 88f079f042632a101bebc43fee574cd869fc2838
+Working tree dirty: False
+OS: Debian GNU/Linux 13 (trixie)
+Architecture: x86_64
+Build directory: /__w/gui-boundary/gui-boundary/build-screenshots
+Reused existing binaries (--skip-build): False
+Native profile: Release, Clang 19, FLTK + SDL + Rev (bundled GLEW/FreeType)
+Wasm profile: Release, distribution Emscripten
+Application: fresh initial state, 640x480 logical pixels, scale 1
+X11: use Xvfb 1280x900x24, 96 DPI; native window client pixels
+Terminal: xterm, 80x31 cells, DejaVu Sans Mono 10pt; includes status row
+Browser: Chromium, 640x512 viewport; captured 640x480 application area
+LIBGL_ALWAYS_SOFTWARE: 1
+
+cmake version 3.31.6
+Debian clang version 19.1.7 (3+b1)
+emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.69 ()
+Chromium 154.0.8037.57 built on Debian GNU/Linux 13 (trixie)
+ChromeDriver 154.0.8037.57 (73c14f6228d7cd537c855007e8f88678969cc0eb-refs/branch-heads/8037@{#1293})
+XTerm(398)
+Selenium: 4.31.1
+
+Distribution packages (where installed):
+fonts-dejavu-core 2.37-8
+fonts-liberation 1:2.1.5-3
+imagemagick 8:7.1.1.43+dfsg1-1+deb13u12
+libfltk1.3-dev:amd64 1.3.11-2
+libgl1-mesa-dri:amd64 25.0.7-2+deb13u1
+libsdl2-dev:amd64 2.32.4+dfsg-1
+xvfb 2:21.1.16-1.3+deb13u4
+
+Images (SHA256):
+df61317b19a5bc8a277fce43818252b91e7fb060fcfdfb70bea1ba33d4e4d0a1  fltk.png  640x480
+d4a4862535db4c3d74d696fbdf82371240bba1ffba4f028aa678cc91f7e7b10e  rev.png  640x480
+a0593404343413926982726ed218a1e7885997c1a290051ab6e613d7f8fba56f  sdl.png  640x480
+363dc08885a3629e2a2b198e90d7edac0ccd40aa293681a3c05b89235eb3f78f  tui.png  644x531
+8af1d235f0f90c454c8fcacc8b8f5bec30f88ee088c3ceb5958eda4285ff59d3  framebuffer.png  640x480
+1372ef4d50629ac0abd95360320009669155ffa2b3fece165048ad0fde3218bc  web-hosted.png  640x480
+1372ef4d50629ac0abd95360320009669155ffa2b3fece165048ad0fde3218bc  web-wasm.png  640x480
