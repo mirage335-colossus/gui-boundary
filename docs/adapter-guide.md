@@ -122,6 +122,15 @@ The SDL host demonstrates a real window/input/texture embedding. The file-output
 host is useful for reproducible pixel inspection and headless checks. Physical
 display controllers and their pixel packing belong in additional hosts.
 
+The default [font implementation](framebuffer-font.md) bundles antialiased
+DejaVu Sans Mono pixels and metrics from the same sources as Rev, without a
+runtime font dependency. `FramebufferTextRenderer` accepts paired measurement
+and painting callbacks for hosts needing broader glyph coverage or shaping.
+Both callbacks must describe the same font geometry so wrapping, caret
+positioning, selection and drawing agree. Font choice belongs in this renderer
+or host provider; application declarations continue to specify logical size,
+boldness and tone.
+
 ## Services and lifecycle
 
 Host requests are owned values with unique IDs. A completion reaches shared code

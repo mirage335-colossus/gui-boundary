@@ -22,9 +22,13 @@ host prompt; opening details demonstrates a modal composed from ordinary shared
 widgets.
 
 All backends consume those same declarations and logical rectangles. The layout,
-page placement, modal scope, colors, and feature behavior stay shared. Native
-font metrics, terminal cells, and the demonstration framebuffer font account for
-visible differences. See the [walkthrough](docs/running.md#try-the-same-features-in-each-interface)
+page placement, modal scope, colors, and feature behavior stay shared. The
+framebuffer and SDL host use antialiased DejaVu Sans Mono from the same regular
+and bold font sources as Rev, with bundled pixels and metrics that need no
+runtime font library. FLTK's font and native widget details can still differ;
+terminal output follows its cell grid. See the
+[font implementation](docs/framebuffer-font.md) and
+[walkthrough](docs/running.md#try-the-same-features-in-each-interface)
 for a repeatable way to compare the interfaces.
 
 ## Build the core binaries: TUI, hosted web, and framebuffer image
@@ -252,9 +256,9 @@ real PTY, socket/process, SDL, FLTK, and Rev paths when their prerequisites are 
 Public-header and application isolation checks run during compilation.
 
 The profiles have explicit limits: terminal output escapes non-ASCII characters
-while retaining UTF-8 values, the default framebuffer font shows fallback glyphs
-for unsupported characters, and software profiles do not provide an OS
-accessibility or IME engine. Interactive profiles implement prompts; other host
-services vary by profile and report errors when unavailable. See
+while retaining UTF-8 values, the bundled framebuffer font covers ASCII and
+Latin-1 with a replacement glyph for other characters, and software profiles do
+not provide an OS accessibility or IME engine. Interactive profiles implement
+prompts; other host services vary by profile and report errors when unavailable. See
 [backend profiles](docs/conformance.md#backend-profiles) before treating a passing
 test suite as qualification for a particular platform or assistive technology.

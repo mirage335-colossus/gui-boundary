@@ -10,6 +10,9 @@ std::array<std::uint8_t,3> pixel(const gui::Frame& frame,unsigned x,unsigned y) 
     return {(*frame.pixels)[at],(*frame.pixels)[at+1],(*frame.pixels)[at+2]};
 }
 std::array<std::uint8_t,3> rgb(gui::Color color) {return {color.red,color.green,color.blue};}
+bool contains(gui::DeviceRect box,unsigned x,unsigned y) {
+    return int(x)>=box.x&&int(y)>=box.y&&int(x)<box.x+int(box.width)&&int(y)<box.y+int(box.height);
+}
 void output_and_input() {
     framebuffer_example::Session session;auto& adapter=session.adapter;
     const auto initial=adapter.frame();
@@ -81,6 +84,34 @@ void modal_and_prompt_output() {
     adapter.text("Visible reply");adapter.key(gui::Key::enter);check(!adapter.prompt(),"Prompt did not complete");
     check(adapter.frame(prompt.revision).revision>prompt.revision,"Prompt completion did not redraw content");
 }
+void prompt_chrome_and_input() {
+    gui::FramebufferAdapter adapter;gui::Snapshot view;view.client_size={360,220};adapter.present(view);
+    std::vector<gui::ServiceResult> results;
+    const auto open=[&](std::uint64_t id) {
+        check(adapter.service({id,gui::ServiceKind::prompt,"Choose a display name","Existing",32},
+            [&](gui::ServiceResult result){results.push_back(std::move(result));}),"Prompt service was rejected");
+    };
+    open(31);const auto frame=adapter.frame();
+    const auto field=gui::device_rect(adapter.prompt_field_bounds(),1);std::size_t highlighted=0;
+    for(unsigned y=unsigned(field.y);y<unsigned(field.y)+field.height;++y)
+        for(unsigned x=unsigned(field.x);x<unsigned(field.x)+field.width;++x)
+            if(pixel(frame,x,y)==rgb(view.palette.selection))++highlighted;
+    check(highlighted>0,"Prompt omitted the initial selected-text highlight");
+    for(const auto area:{adapter.prompt_cancel_bounds(),adapter.prompt_accept_bounds()}) {
+        const auto box=gui::device_rect(area,1);
+        check(pixel(frame,unsigned(box.x)+2,unsigned(box.y)+2)==rgb(view.palette.surface),
+            "Prompt action did not render its declared surface");
+        check(pixel(frame,unsigned(box.x)+box.width/2,unsigned(box.y))==rgb(view.palette.border),
+            "Prompt action did not render a visible border");
+    }
+    adapter.pointer({gui::PointerKind::click,framebuffer_example::center(adapter.prompt_cancel_bounds())});
+    check(!adapter.prompt()&&results.size()==1&&results.back().id==31&&results.back().status==gui::ServiceStatus::cancelled,
+        "Rendered Cancel button did not use shared prompt dismissal");
+    open(32);adapter.text("Replacement");
+    adapter.pointer({gui::PointerKind::click,framebuffer_example::center(adapter.prompt_accept_bounds())});
+    check(!adapter.prompt()&&results.size()==2&&results.back().id==32&&results.back().status==gui::ServiceStatus::success&&results.back().value=="Replacement",
+        "Rendered OK button did not accept the shared prompt text exactly once");
+}
 void custom_font_and_paint_guards() {
     gui::FramebufferAdapter* active=nullptr;bool saw_unicode=false,mutation_rejected=false,recursion_rejected=false;
     gui::FramebufferTextRenderer font;
@@ -109,20 +140,118 @@ void custom_font_and_paint_guards() {
     })};source_view.widgets.push_back(bitmap);source_adapter.present(source_view);
     check(pixel(source_adapter.frame(),1,1)==std::array<std::uint8_t,3>{1,2,3}&&source_guard&&!source_adapter.prompt(),"Bitmap producer bypassed shared interaction paint guard");
 }
-void wrapped_editor_output() {
-    gui::FramebufferAdapter adapter;gui::Snapshot view;view.client_size={120,100};
-    gui::Widget editor;editor.spec.key.id="wrapped-text";editor.spec.kind=gui::Kind::text;editor.spec.text_policy.multiline=true;
-    editor.state.bounds={5,5,58,64};editor.state.text="ab cd ef";editor.state.wrap=gui::TextWrap::word;view.widgets.push_back(editor);adapter.present(view);
-    adapter.focus(editor.spec.key);adapter.text_selection(editor.spec.key,{8,8});
-    const auto lines=adapter.editor_lines(editor);check(lines.size()>=3,"Narrow editor did not use shared word-wrap lines");
-    const auto frame=adapter.frame();const auto content=adapter.text_bounds(editor);const auto ink=rgb(view.palette.text);
-    for(std::size_t row=0;row<lines.size();++row) {
-        std::size_t pixels=0;const auto y=unsigned(content.y+double(row)*adapter.line_height(editor.state.font));
-        for(unsigned dy=0;dy<unsigned(adapter.line_height(editor.state.font));++dy)
-            for(unsigned x=unsigned(content.x);x<unsigned(content.x+content.width);++x)if(pixel(frame,x,y+dy)==ink)++pixels;
-        check(pixels>0,"Software editor omitted a wrapped visual line");
+void default_font_output() {
+    const gui::Color background{219,191,153},foreground{17,73,131};
+    const auto render=[&](std::string text,bool bold=false,double scale=1) {
+        gui::FramebufferAdapter adapter;gui::Snapshot view;view.client_size={160,40};view.display_scale=scale;
+        view.palette.background=background;view.palette.text=foreground;
+        gui::Widget label;label.spec.key.id="sample";label.spec.kind=gui::Kind::label;
+        label.state.bounds={4,4,152,32};label.state.text=std::move(text);label.state.font={14,bold};view.widgets.push_back(label);
+        adapter.present(view);return adapter.frame();
+    };
+    for(const double scale:{1.0,1.25,1.5,2.0}) {
+        const auto frame=render("Aa éÑß",false,scale);std::size_t painted=0,blended=0;
+        for(unsigned y=0;y<frame.height;++y)for(unsigned x=0;x<frame.width;++x) {
+            const auto value=pixel(frame,x,y);if(value==rgb(background))continue;
+            ++painted;if(value!=rgb(foreground))++blended;
+            for(std::size_t channel=0;channel<value.size();++channel)
+                check(value[channel]>=rgb(foreground)[channel]&&value[channel]<=rgb(background)[channel],
+                    "Default font ignored custom text/background colors while blending");
+        }
+        check(painted>0&&blended>0,"Default font lost antialiased coverage at a supported display scale");
     }
-    check(adapter.editor_caret_position(editor,8).y>0,"Wrapped editor caret remained on first row");
+    const auto empty=render(""),regular=render("Aa"),bold=render("Aa",true);
+    const auto plain=render("e"),latin=render("é"),replacement=render("�"),unsupported=render("🙂");
+    check(*regular.pixels!=*empty.pixels&&*bold.pixels!=*regular.pixels,"Default font did not render distinct regular and bold faces");
+    check(*latin.pixels!=*empty.pixels&&*latin.pixels!=*plain.pixels&&*latin.pixels!=*replacement.pixels,
+        "Supported Latin-1 glyphs lost their accented appearance");
+    check(*replacement.pixels!=*empty.pixels&&*replacement.pixels!=*render("?").pixels&&*unsupported.pixels==*replacement.pixels,
+        "Unsupported text did not render a visible replacement glyph");
+    gui::FramebufferAdapter adapter;
+    const auto metrics=[&](const std::string& value) {return adapter.measure_text({value,{},160,1,gui::TextWrap::none});};
+    check(metrics("é").width==metrics("e").width&&metrics("🙂").width==metrics("�").width,
+        "Default font measured UTF-8 bytes instead of displayed glyphs");
+    check(metrics("é\nÑ").height==2*metrics("é").height,"Default font measurements lost explicit line breaks");
+}
+void label_word_wrap() {
+    for(const double scale:{1.0,1.25,1.5,2.0}) {
+        gui::FramebufferAdapter adapter;
+        const auto single=adapter.measure_text({"aa",{},80,scale,gui::TextWrap::none});
+        const auto expected=adapter.measure_text({"aa\nbb",{},single.width,scale,gui::TextWrap::none});
+        const auto render=[&](const std::string& text,gui::TextWrap wrap) {
+            gui::Snapshot view;view.client_size={80,96};view.display_scale=scale;
+            gui::Widget label;label.spec.key.id="wrapped-label";label.spec.kind=gui::Kind::label;
+            label.state.bounds={4,4,single.width,3*single.height};label.state.text=text;label.state.wrap=wrap;
+            view.widgets.push_back(label);adapter.present(view);return adapter.frame();
+        };
+        const auto explicit_lines=render("aa\nbb",gui::TextWrap::none);
+        for(const std::string text:{"aa bb","aa\tbb"}) {
+            const auto measured=adapter.measure_text({text,{},single.width,scale,gui::TextWrap::word});
+            check(measured==expected&&measured.height==2*single.height,
+                "Wrapping at an exact word width added a separator-only line");
+            check(*render(text,gui::TextWrap::word).pixels==*explicit_lines.pixels,
+                "Soft word wrapping painted differently from the equivalent explicit lines");
+        }
+        const auto glyph=adapter.measure_text({"a",{},80,scale,gui::TextWrap::none});
+        check(adapter.measure_text({"ab",{},0,scale,gui::TextWrap::word})==gui::Size{glyph.width,2*glyph.height},
+            "A zero-width label failed to make progress through an overlong word");
+    }
+}
+void antialiased_text_clipping() {
+    for(const double scale:{1.25,1.5,2.0}) {
+        gui::FramebufferAdapter adapter;gui::Snapshot view;view.client_size={80,60};view.display_scale=scale;
+        gui::Widget parent;parent.spec.key.id="clip-parent";parent.spec.kind=gui::Kind::group;
+        parent.state.bounds={2,2,72,50};parent.state.content_clip=gui::Rect{15.25,13.5,23.5,16.25};view.widgets.push_back(parent);
+        adapter.present(view);const auto before=adapter.frame();
+        gui::Widget label;label.spec.key.id="clipped-text";label.spec.parent=parent.spec.key.id;label.spec.kind=gui::Kind::label;
+        label.state.bounds={6,6,64,36};label.state.text="MMMMMMMM\nMMMMMMMM";label.state.font.size=18;view.widgets.push_back(label);
+        adapter.present(view);const auto after=adapter.frame();
+        const auto content=*parent.state.content_clip;
+        const auto clip=gui::device_rect({parent.state.bounds.x+content.x,parent.state.bounds.y+content.y,content.width,content.height},scale);
+        std::size_t changed=0;
+        for(unsigned y=0;y<after.height;++y)for(unsigned x=0;x<after.width;++x)if(pixel(before,x,y)!=pixel(after,x,y)) {
+            ++changed;check(contains(clip,x,y),"Antialiased glyph pixels escaped a fractional ancestor clip");
+        }
+        check(changed>0,"Ancestor clipping discarded all visible glyph pixels");
+    }
+}
+void wrapped_editor_output() {
+    for(const double scale:{1.0,1.25,1.5,2.0}) {
+        gui::FramebufferAdapter adapter;gui::Snapshot view;view.client_size={120,110};view.display_scale=scale;
+        gui::Widget editor;editor.spec.key.id="wrapped-text";editor.spec.kind=gui::Kind::text;editor.spec.text_policy.multiline=true;
+        editor.state.bounds={5,5,42,84};editor.state.text="ab cd ef";editor.state.wrap=gui::TextWrap::word;view.widgets.push_back(editor);adapter.present(view);
+        adapter.focus(editor.spec.key);adapter.text_selection(editor.spec.key,{8,8});
+        const auto lines=adapter.editor_lines(editor);check(lines.size()>=3,"Narrow editor did not use shared word-wrap lines");
+        const auto frame=adapter.frame();const auto content=adapter.text_bounds(editor);const auto height=adapter.line_height(editor.state.font);
+        for(std::size_t row=0;row<lines.size();++row) {
+            const auto area=gui::device_rect({content.x,content.y+double(row)*height,content.width,height},scale);std::size_t ink=0;
+            for(unsigned y=unsigned(area.y);y<unsigned(area.y)+area.height;++y)
+                for(unsigned x=unsigned(area.x);x<unsigned(area.x)+area.width;++x) {
+                    const auto value=pixel(frame,x,y);
+                    if(value!=rgb(view.palette.surface)&&value!=rgb(view.palette.accent))++ink;
+                }
+            check(ink>0,"Software editor omitted a wrapped visual line");
+            const auto line=lines[row];
+            const auto measured=adapter.measure_text({editor.state.text.substr(line.begin,line.end-line.begin),editor.state.font,content.width,scale,gui::TextWrap::none});
+            const auto position=adapter.editor_caret_position(editor,line.end);
+            check(position==gui::Point{measured.width,double(row)*height},"Wrapped caret geometry disagreed with font measurements");
+            adapter.text_selection(editor.spec.key,{line.begin,line.end});const auto selected=adapter.frame();
+            const auto caret=gui::device_rect({content.x+position.x,content.y+position.y,1/scale,height},scale);
+            check(pixel(selected,unsigned(caret.x),unsigned(caret.y)+caret.height/2)==rgb(view.palette.accent),
+                "Rendered caret did not follow measured wrapped text");
+            const auto selection=gui::device_rect({content.x,content.y+double(row)*height,measured.width,height},scale);
+            std::size_t selected_pixels=0;bool reaches_end=false;
+            for(unsigned y=0;y<selected.height;++y)for(unsigned x=0;x<selected.width;++x)if(pixel(selected,x,y)==rgb(view.palette.selection)) {
+                ++selected_pixels;check(contains(selection,x,y),"Editor selection escaped its measured wrapped line");
+                if(int(x)>=selection.x+int(selection.width)-2)reaches_end=true;
+            }
+            check(selected_pixels>0&&reaches_end,"Editor selection did not cover the measured text width");
+            const auto first=adapter.measure_text({editor.state.text.substr(line.begin,1),editor.state.font,content.width,scale,gui::TextWrap::none});
+            adapter.pointer({gui::PointerKind::click,{content.x+first.width,content.y+(double(row)+0.5)*height}});
+            check(adapter.text_selection(editor.spec.key).caret==line.begin+1,"Pointer placement disagreed with measured wrapped glyph positions");
+        }
+        check(adapter.editor_caret_position(editor,8).y>0,"Wrapped editor caret remained on first row");
+    }
 }
 void budget() {
     gui::FramebufferAdapter adapter({},1024);gui::Snapshot view;view.client_size={30,30};bool threw=false;
@@ -132,6 +261,6 @@ void budget() {
 }
 }
 int main() {
-    try {output_and_input();lifetime_and_theme();clipping_scale_and_formats();modal_and_prompt_output();custom_font_and_paint_guards();wrapped_editor_output();budget();std::cout<<"Framebuffer rendering, input, damage and ownership passed\n";}
+    try {output_and_input();lifetime_and_theme();clipping_scale_and_formats();modal_and_prompt_output();prompt_chrome_and_input();custom_font_and_paint_guards();default_font_output();label_word_wrap();antialiased_text_clipping();wrapped_editor_output();budget();std::cout<<"Framebuffer rendering, input, damage and ownership passed\n";}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -4,8 +4,8 @@ This document defines the package's general-purpose UI boundary. **Must** denote
 required behavior. **May** denotes an implementation choice that preserves it.
 The retained C++ engine and concrete native, terminal, framebuffer and browser
 profiles make these rules executable. Profile adaptations and limits are explicit
-in [conformance coverage](conformance.md); a small software font or a cell display
-does not claim the shaping/accessibility capabilities of native controls.
+in [conformance coverage](conformance.md); the bundled software font and terminal
+cell display do not claim the shaping/accessibility capabilities of native controls.
 
 Related contracts specify [bitmaps](bitmap-contract.md),
 [layout](layout-contract.md), and [runtime services](runtime-contract.md).

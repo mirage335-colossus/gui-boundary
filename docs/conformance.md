@@ -191,7 +191,7 @@ must be reported as skipped when their actual prerequisites are unavailable.
 | Native widgets | FLTK controls and drawing | Toolkit and display required; native shaping, IME and accessibility need platform checks |
 | Rev widgets | Private C++23 toolkit modules, native controls/text and OpenGL textures | Preserved sources plus supported compiler/graphics stack required; platform IME, accessibility and GPU behavior need qualification |
 | Terminal | Shared logical geometry projected into terminal cells | Discrete cells, reduced artwork detail, terminal font and color behavior; no pixel-identical glyph promise |
-| Software framebuffer | Shared interaction and full RGB raster image | Small demonstration font; unsupported glyphs have a visible fallback; no independent screen-reader or IME engine |
+| Software framebuffer | Shared interaction and full RGB raster image; bundled antialiased DejaVu Sans Mono pixels and metrics | Printable ASCII and Latin-1 coverage with a replacement glyph elsewhere; no independent shaping, screen-reader or IME engine |
 | Framebuffer window host | SDL input and texture upload | Inherits software rendering limits; SDL/display required |
 | Hosted browser | Native C++ process, bounded JSON protocol, retained DOM | Asynchronous metrics and transport; local server profile; prompt service only |
 | Wasm browser | Same C++ application/protocol and same DOM renderer | Emscripten build required; same browser metric/service limits; no server-side filesystem semantics |
@@ -200,6 +200,13 @@ All families consume the same application geometry, colors, page rectangles,
 modal scope, stable option/record IDs and event vocabulary. Different glyph
 metrics and cell quantization are supported adaptations. A separately authored
 application arrangement or an adapter branch naming a feature is not.
+
+The framebuffer and SDL host use the same regular and bold font sources as Rev.
+Their compiled glyphs need no runtime font library or system fonts; measurement,
+painting and editor positioning use the same metrics. FLTK's selected font and
+native control details can still differ. See the
+[font implementation](framebuffer-font.md) for coverage, retained sizes and
+optional regeneration.
 
 ## Required visual and interaction scenarios
 
@@ -263,8 +270,9 @@ Python 3.13, Node 20 and Emscripten 3.1.69:
   sources and documentation contain no references to another application.
 
 Windows console execution, macOS behavior, platform screen readers and native
-IME combinations were not qualified by this Linux run. The software font's
-fallback behavior is a documented profile constraint, not Unicode shaping.
+IME combinations were not qualified by this Linux run. The bundled software
+font preserves unsupported text through a replacement glyph; it does not
+implement Unicode shaping.
 
 ## Rev implementation validation
 

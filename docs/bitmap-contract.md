@@ -296,8 +296,15 @@ returned storage always contains every pixel. Failed rendering leaves the last
 complete frame intact. The SDL host uploads that frame; the PPM host illustrates
 embedding without a window.
 
-The software renderer's default font supplies ASCII glyphs. `FramebufferTextRenderer`
-pairs a metrics provider with a guarded painter receiving UTF-8 text, logical
-bounds, font, wrap, scale and color. An embedder can supply a richer font engine
-without changing the application. Provider callbacks cannot mutate input or
-presentation while drawing, and rectangle output is clipped by the renderer.
+The software renderer's default font uses bundled antialiased DejaVu Sans Mono
+regular and bold glyphs from the same sources as Rev. The compiled pixels and
+metrics cover printable ASCII and Latin-1, with a replacement glyph elsewhere.
+Measurement, painting, wrapping and editor positioning share those metrics;
+ordinary builds and execution need no font library or installed fonts. See the
+[font implementation](framebuffer-font.md) for retained sizes and regeneration.
+
+`FramebufferTextRenderer` pairs a metrics provider with a guarded painter
+receiving UTF-8 text, logical bounds, font, wrap, scale and color. An embedder can
+supply broader coverage or a shaping engine without changing the application.
+Provider callbacks cannot mutate input or presentation while drawing, and
+rectangle output is clipped by the renderer.

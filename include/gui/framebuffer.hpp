@@ -1,5 +1,6 @@
 #pragma once
 #include "interaction.hpp"
+#include "detail/framebuffer_font_data.hpp"
 #include "runtime.hpp"
 #include <array>
 #include <limits>
@@ -42,109 +43,75 @@ struct FramebufferTextRenderer {
 
 namespace framebuffer_detail {
 using Color=std::array<std::uint8_t,3>;
-// Small original 5x7 demonstration alphabet. Unsupported Unicode codepoints
-// use ?. This is deliberately not a shaping or
-// accessibility engine. Input and application text remain intact UTF-8.
-inline std::array<unsigned,7> glyph(char c) {
-    switch(c) {
-    case 'a':return {0,0,14,1,15,17,15};case 'b':return {16,16,30,17,17,17,30};
-    case 'c':return {0,0,14,16,16,17,14};case 'd':return {1,1,15,17,17,17,15};
-    case 'e':return {0,0,14,17,31,16,14};case 'f':return {6,9,8,28,8,8,8};
-    case 'g':return {0,15,17,17,15,1,14};case 'h':return {16,16,30,17,17,17,17};
-    case 'i':return {4,0,12,4,4,4,14};case 'j':return {2,0,6,2,2,18,12};
-    case 'k':return {16,16,18,20,24,20,18};case 'l':return {12,4,4,4,4,4,14};
-    case 'm':return {0,0,26,21,21,21,21};case 'n':return {0,0,30,17,17,17,17};
-    case 'o':return {0,0,14,17,17,17,14};case 'p':return {0,0,30,17,30,16,16};
-    case 'q':return {0,0,15,17,15,1,1};case 'r':return {0,0,22,25,16,16,16};
-    case 's':return {0,0,15,16,14,1,30};case 't':return {8,8,28,8,8,9,6};
-    case 'u':return {0,0,17,17,17,19,13};case 'v':return {0,0,17,17,17,10,4};
-    case 'w':return {0,0,17,17,21,21,10};case 'x':return {0,0,17,10,4,10,17};
-    case 'y':return {0,0,17,17,15,1,14};case 'z':return {0,0,31,2,4,8,31};
-    case 'A':return {14,17,17,31,17,17,17};case 'B':return {30,17,17,30,17,17,30};
-    case 'C':return {14,17,16,16,16,17,14};case 'D':return {30,17,17,17,17,17,30};
-    case 'E':return {31,16,16,30,16,16,31};case 'F':return {31,16,16,30,16,16,16};
-    case 'G':return {14,17,16,23,17,17,15};case 'H':return {17,17,17,31,17,17,17};
-    case 'I':return {14,4,4,4,4,4,14};case 'J':return {7,2,2,2,2,18,12};
-    case 'K':return {17,18,20,24,20,18,17};case 'L':return {16,16,16,16,16,16,31};
-    case 'M':return {17,27,21,21,17,17,17};case 'N':return {17,25,25,21,19,19,17};
-    case 'O':return {14,17,17,17,17,17,14};case 'P':return {30,17,17,30,16,16,16};
-    case 'Q':return {14,17,17,17,21,18,13};case 'R':return {30,17,17,30,20,18,17};
-    case 'S':return {15,16,16,14,1,1,30};case 'T':return {31,4,4,4,4,4,4};
-    case 'U':return {17,17,17,17,17,17,14};case 'V':return {17,17,17,17,17,10,4};
-    case 'W':return {17,17,17,21,21,27,17};case 'X':return {17,17,10,4,10,17,17};
-    case 'Y':return {17,17,10,4,4,4,4};case 'Z':return {31,1,2,4,8,16,31};
-    case '0':return {14,17,19,21,25,17,14};case '1':return {4,12,4,4,4,4,14};
-    case '2':return {14,17,1,2,4,8,31};case '3':return {30,1,1,14,1,1,30};
-    case '4':return {2,6,10,18,31,2,2};case '5':return {31,16,16,30,1,1,30};
-    case '6':return {14,16,16,30,17,17,14};case '7':return {31,1,2,4,8,8,8};
-    case '8':return {14,17,17,14,17,17,14};case '9':return {14,17,17,15,1,1,14};
-    case ' ':return {};case '.':return {0,0,0,0,0,6,6};case ',':return {0,0,0,0,6,6,4};
-    case ':':return {0,6,6,0,6,6,0};case ';':return {0,6,6,0,6,6,4};
-    case '-':return {0,0,0,31,0,0,0};case '_':return {0,0,0,0,0,0,31};
-    case '+':return {0,4,4,31,4,4,0};case '=':return {0,0,31,0,31,0,0};
-    case '/':return {1,2,2,4,8,8,16};case '\\':return {16,8,8,4,2,2,1};
-    case '[':return {14,8,8,8,8,8,14};case ']':return {14,2,2,2,2,2,14};
-    case '(':return {2,4,8,8,8,4,2};case ')':return {8,4,2,2,2,4,8};
-    case '<':return {1,2,4,8,4,2,1};case '>':return {16,8,4,2,4,8,16};
-    case '!':return {4,4,4,4,4,0,4};case '?':return {14,17,1,2,4,0,4};
-    case '"':return {10,10,10,0,0,0,0};case '\'':return {4,4,4,0,0,0,0};
-    case '*':return {0,21,14,31,14,21,0};case '#':return {10,31,10,10,31,10,0};
-    case '%':return {25,25,2,4,8,19,19};case '&':return {12,18,20,8,21,18,13};
-    case '@':return {14,17,23,21,23,16,14};case '|':return {4,4,4,4,4,4,4};
-    case '^':return {4,10,17,0,0,0,0};case '~':return {0,0,8,21,2,0,0};
-    case '$':return {4,15,20,14,5,30,4};case '`':return {8,4,0,0,0,0,0};
-    case '{':return {2,4,4,8,4,4,2};case '}':return {8,4,4,2,4,4,8};
-    default:return {14,17,1,2,4,0,4};
+// Measurement and paint use the same retained font data, including the same
+// hinted device size. Hosts need neither a font file nor a font rasterizer.
+struct FontMetrics {
+    const framebuffer_font::Face& face;
+    double unit;
+    double height() const {return face.line_height*unit;}
+    double advance(char32_t codepoint) const {
+        return codepoint==U'\t'?4*framebuffer_font::glyph(face,U' ').advance*unit:
+            framebuffer_font::glyph(face,codepoint).advance*unit;
     }
+};
+inline FontMetrics metrics(const Font& font,double scale) {
+    const auto pixels=std::max(1u,static_cast<unsigned>(font.size*scale));
+    const auto& face=framebuffer_font::face(pixels,font.bold);
+    return {face,double(pixels)/face.pixels/scale};
 }
 inline std::size_t next(std::string_view value,std::size_t at) {
     if(at>=value.size())return value.size();
     ++at;while(at<value.size()&&(static_cast<unsigned char>(value[at])&0xc0)==0x80)++at;
     return at;
 }
-inline std::size_t previous(std::string_view value,std::size_t at) {
-    return at==0?0:text_boundary(value,at-1);
-}
 inline std::size_t count(std::string_view value) {
     std::size_t n=0;for(std::size_t i=0;i<value.size();i=next(value,i))++n;return n;
 }
-inline std::string display(std::string_view value) {
-    std::string out;
-    for(std::size_t i=0;i<value.size();i=next(value,i)) {
-        const auto c=static_cast<unsigned char>(value[i]);
-        if(c=='\t')out.append(4,' ');
-        else if(c=='\r')continue;
-        else out.push_back(c<128?char(c):'?');
-    }
-    return out;
-}
-inline std::vector<std::string> lines(std::string_view value,std::size_t columns,TextWrap wrap) {
-    std::vector<std::string> out;
-    const auto text=display(value);std::size_t begin=0;
-    for(;;) {
-        const auto end=text.find('\n',begin);
-        auto line=text.substr(begin,end==std::string::npos?std::string::npos:end-begin);
-        while(wrap==TextWrap::word&&line.size()>columns&&columns>0) {
-            auto split=line.rfind(' ',columns);
-            if(split==std::string::npos||split==0)split=columns;
-            out.push_back(line.substr(0,split));
-            if(split<line.size()&&line[split]==' ')++split;
-            line.erase(0,split);
+inline std::u32string display(std::string_view value) {
+    std::u32string out;
+    for(std::size_t i=0;i<value.size();) {
+        const auto first=static_cast<unsigned char>(value[i++]);
+        char32_t codepoint=first;
+        if(first>=128) {
+            const unsigned continuation=first<0xe0?1:first<0xf0?2:3;
+            codepoint=first&((1u<<(6-continuation))-1);
+            for(unsigned n=0;n<continuation;++n)codepoint=(codepoint<<6)|(static_cast<unsigned char>(value[i++])&63);
         }
-        out.push_back(std::move(line));
-        if(end==std::string::npos)break;
-        begin=end+1;
+        if(codepoint!='\r')out.push_back(codepoint);
     }
     return out;
 }
-inline double unit(const Font& font,double scale) {return std::max(1.0,std::round(font.size*scale/8.0))/scale;}
+struct TextLine {std::u32string text;double width;};
+inline std::vector<TextLine> lines(std::string_view value,const FontMetrics& font,double width,TextWrap wrap) {
+    std::vector<TextLine> out;
+    const auto text=display(value);
+    for(std::size_t begin=0;;) {
+        const auto newline=text.find(U'\n',begin);
+        const auto end=newline==std::u32string::npos?text.size():newline;
+        if(begin==end)out.push_back({{},0});
+        while(begin<end) {
+            auto at=begin,last_space=std::u32string::npos;double advance=0,space_width=0;
+            while(at<end) {
+                const auto next_width=advance+font.advance(text[at]);
+                if((text[at]==U' '||text[at]==U'\t')&&at>begin){last_space=at;space_width=advance;}
+                if(wrap==TextWrap::word&&at>begin&&next_width>width)break;
+                advance=next_width;++at;
+            }
+            if(at<end&&last_space!=std::u32string::npos) {
+                out.push_back({text.substr(begin,last_space-begin),space_width});begin=last_space+1;
+            } else {out.push_back({text.substr(begin,at-begin),advance});begin=at;}
+        }
+        if(newline==std::u32string::npos)break;
+        begin=newline+1;
+    }
+    return out;
+}
 inline Size measure(const TextMeasureRequest& request) {
     validate_measure_request(request);
-    const double u=unit(request.font,request.display_scale);
-    const auto columns=static_cast<std::size_t>(std::max(1.0,std::floor(request.available_width/(6*u))));
-    const auto rows=lines(request.text,columns,request.wrap);
-    std::size_t width=0;for(const auto& row:rows)width=std::max(width,row.size());
-    return {double(width)*6*u,double(rows.size())*8*u};
+    const auto font=metrics(request.font,request.display_scale);
+    const auto rows=lines(request.text,font,request.available_width,request.wrap);
+    double width=0;for(const auto& row:rows)width=std::max(width,row.width);
+    return {width,double(rows.size())*font.height()};
 }
 }
 
@@ -153,7 +120,7 @@ inline Size measure(const TextMeasureRequest& request) {
 class FramebufferAdapter final : public InteractiveAdapter {
 public:
     explicit FramebufferAdapter(EventSink sink={},std::size_t frame_budget=64*1024*1024,FramebufferTextRenderer text_renderer={})
-        :InteractiveAdapter(std::move(sink),text_renderer.measure?text_renderer.measure:framebuffer_detail::measure),
+        :InteractiveAdapter(std::move(sink),text_renderer.measure?text_renderer.measure:framebuffer_detail::measure,4),
             frame_budget_(frame_budget),text_renderer_(std::move(text_renderer)) {
         if(bool(text_renderer_.measure)!=bool(text_renderer_.paint))throw std::invalid_argument("Text provider requires measurement and painting together");
     }
@@ -237,12 +204,65 @@ private:
         fill({box.x,std::max(box.y,box.y+box.height-thickness),box.width,std::min(thickness,box.height)},color);
         fill({std::max(box.x,box.x+box.width-thickness),box.y,std::min(thickness,box.width),box.height},color);
     }
+    void blend(int x,int y,framebuffer_detail::Color color,unsigned coverage) {
+        const auto at=std::size_t(y)*stride_+std::size_t(x)*3;
+        for(unsigned channel=0;channel<3;++channel)
+            canvas_[at+channel]=static_cast<std::uint8_t>((color[channel]*coverage+canvas_[at+channel]*(255-coverage)+127)/255);
+    }
+    void draw_glyph(const framebuffer_font::Glyph& glyph,double x,double y,
+                    const framebuffer_detail::FontMetrics& font,framebuffer_detail::Color color) {
+        if(!glyph.width||!glyph.height)return;
+        const double left=(x+glyph.left*font.unit)*scale_;
+        const double top=(y+(double(font.face.ascent)-glyph.top)*font.unit)*scale_;
+        const double ratio=font.unit*scale_;
+        const auto clip=device_rect(clip_,scale_);
+        // Interpolate coverage, including transparent texels around the glyph,
+        // so fractional positioning and sizes keep smooth edges. At a retained
+        // integer size and origin these are the original hinted font pixels.
+        const int x0=std::max({0,clip.x,int(std::floor(left-ratio/2))});
+        const int y0=std::max({0,clip.y,int(std::floor(top-ratio/2))});
+        const int x1=std::min({int(width_),clip.x+int(clip.width),int(std::ceil(left+(glyph.width+.5)*ratio))});
+        const int y1=std::min({int(height_),clip.y+int(clip.height),int(std::ceil(top+(glyph.height+.5)*ratio))});
+        if(x0>=x1||y0>=y1)return;
+        const auto pixels=framebuffer_font::raster(glyph);
+        const auto sample=[&](int sx,int sy)->double {
+            return sx>=0&&sy>=0&&sx<glyph.width&&sy<glyph.height?pixels[std::size_t(sy)*glyph.width+unsigned(sx)]:0;
+        };
+        for(int py=y0;py<y1;++py)for(int px=x0;px<x1;++px) {
+            const double sx=(px+.5-left)/ratio-.5,sy=(py+.5-top)/ratio-.5;
+            const int ix=int(std::floor(sx)),iy=int(std::floor(sy));
+            const double fx=sx-ix,fy=sy-iy;
+            const auto coverage=static_cast<unsigned>(std::round(
+                (sample(ix,iy)*(1-fx)+sample(ix+1,iy)*fx)*(1-fy)+
+                (sample(ix,iy+1)*(1-fx)+sample(ix+1,iy+1)*fx)*fy));
+            if(coverage)blend(px,py,color,coverage);
+        }
+    }
+    void stroke(Point a,Point b,Point c,framebuffer_detail::Color color,double thickness=1.4) {
+        const double radius=thickness/2;
+        const auto bounds=intersect(clip_,{std::min({a.x,b.x,c.x})-radius,std::min({a.y,b.y,c.y})-radius,
+            std::max({a.x,b.x,c.x})-std::min({a.x,b.x,c.x})+thickness,
+            std::max({a.y,b.y,c.y})-std::min({a.y,b.y,c.y})+thickness});
+        if(!has_area(bounds))return;
+        const auto rect=device_rect(bounds,scale_);
+        const auto distance=[](Point p,Point from,Point to) {
+            const double dx=to.x-from.x,dy=to.y-from.y,length=dx*dx+dy*dy;
+            const double t=length?std::clamp(((p.x-from.x)*dx+(p.y-from.y)*dy)/length,0.0,1.0):0;
+            return std::hypot(p.x-from.x-t*dx,p.y-from.y-t*dy);
+        };
+        for(int y=std::max(0,rect.y);y<std::min(int(height_),rect.y+int(rect.height));++y)
+            for(int x=std::max(0,rect.x);x<std::min(int(width_),rect.x+int(rect.width));++x) {
+                unsigned coverage=0;
+                for(unsigned sy=0;sy<4;++sy)for(unsigned sx=0;sx<4;++sx) {
+                    const Point p{(x+(sx+.5)/4)/scale_,(y+(sy+.5)/4)/scale_};
+                    if(contains(clip_,p)&&std::min(distance(p,a,b),distance(p,b,c))<=radius)++coverage;
+                }
+                if(coverage)blend(x,y,color,(coverage*255+8)/16);
+            }
+    }
     void draw_text(std::string_view value,Rect box,const Font& font={},TextWrap wrap=TextWrap::none,
                    std::optional<framebuffer_detail::Color> color={}) {
         const auto saved=clip_;clip_=intersect(clip_,box);
-        const double u=framebuffer_detail::unit(font,scale_);
-        const auto columns=static_cast<std::size_t>(std::max(1.0,std::floor(box.width/(6*u))));
-        const auto rows=framebuffer_detail::lines(value,columns,wrap);
         const auto foreground=color.value_or(font.tone==Tone::muted?muted:font.tone==Tone::accent?accent:
             font.tone==Tone::error?error_color:ink);
         if(text_renderer_.paint) {
@@ -255,18 +275,20 @@ private:
             });
             clip_=saved;return;
         }
+        const auto metrics=framebuffer_detail::metrics(font,scale_);
+        const auto rows=framebuffer_detail::lines(value,metrics,box.width,wrap);
         double y=box.y;
         for(const auto& row:rows) {
             if(y>=box.y+box.height)break;
-            double x=box.x;
-            for(const char c:row) {
-                if(x>=box.x+box.width)break;
-                const auto g=framebuffer_detail::glyph(c);
-                for(unsigned gy=0;gy<7;++gy)for(unsigned gx=0;gx<5;++gx)
-                    if(g[gy]&(1u<<(4-gx)))fill({x+gx*u,y+gy*u,u+(font.bold?u/2:0),u},foreground);
-                x+=6*u;
+            if(y+metrics.height()>clip_.y) {
+                double x=box.x;
+                for(const auto c:row.text) {
+                    if(x>=box.x+box.width)break;
+                    if(c!=U'\t')draw_glyph(framebuffer_font::glyph(metrics.face,c),x,y,metrics,foreground);
+                    x+=metrics.advance(c);
+                }
             }
-            y+=8*u;
+            y+=metrics.height();
         }
         clip_=saved;
     }
@@ -280,25 +302,31 @@ private:
         const auto a=resolved_availability(widget.spec.key);if(!a.visible)return;
         const auto saved=clip_;clip_=a.clip;
         const auto& state=widget.state;const auto box=a.bounds;
-        const auto color=a.enabled?ink:muted;
-        const auto text_box=Rect{box.x+6,box.y+std::max(2.0,(box.height-line_height(state.font))/2),
-            std::max(0.0,box.width-12),std::max(0.0,box.height-4)};
+        const auto color=a.enabled?state.font.tone==Tone::muted?muted:state.font.tone==Tone::accent?accent:
+            state.font.tone==Tone::error?error_color:ink:muted;
+        const auto text_box=Rect{box.x+4,box.y+std::max(2.0,(box.height-line_height(state.font))/2),
+            std::max(0.0,box.width-8),std::max(0.0,box.height-4)};
         switch(widget.spec.kind) {
         case Kind::group:fill(box,panel);outline(box,border_color);break;
         case Kind::label:draw_text(visible_text(widget),box,state.font,state.wrap,a.enabled?std::nullopt:std::optional{muted});break;
         case Kind::button:fill(box,a.enabled?control_color:disabled_color);outline(box,border_color);centered_text(state.label,text_box,state.font,color);break;
         case Kind::toggle: {
-            fill(box,a.enabled?control_color:disabled_color);const Rect mark{box.x+5,box.y+5,18,18};outline(mark,a.enabled?accent:muted);
-            if(state.checked)draw_text("X",{mark.x+3,mark.y+1,16,16},{12},TextWrap::none,color);
-            auto label=text_box;label.x+=24;label.width=std::max(0.0,label.width-24);draw_text(state.label,label,state.font,TextWrap::none,color);break;
+            const Rect mark{box.x,box.y+3,std::min(20.0,box.width),std::min(20.0,std::max(0.0,box.height-3))};
+            fill(mark,a.enabled?(state.checked?accent:control_color):disabled_color);outline(mark,border_color);
+            if(state.checked)stroke({mark.x+4,mark.y+10},{mark.x+8,mark.y+14},{mark.x+16,mark.y+5},a.enabled?panel:muted,1.6);
+            draw_text(state.label,{box.x+26,box.y+2,std::max(0.0,box.width-26),std::max(0.0,box.height-4)},state.font,TextWrap::none,color);break;
         }
         case Kind::choice:case Kind::menu: {
             fill(box,a.enabled?control_color:disabled_color);outline(box,border_color);const auto label=visible_text(widget);
-            auto content=text_box;content.width=std::max(0.0,content.width-20);
-            draw_text(label,content,state.font,TextWrap::none,color);draw_text("v",{box.x+box.width-20,text_box.y,16,20},{12},TextWrap::none,color);break;
+            if(widget.spec.kind==Kind::choice) {
+                draw_text(label,{box.x+2,box.y+2,std::max(0.0,box.width-20),std::max(0.0,box.height-4)},state.font,TextWrap::none,color);
+                const double x=box.x+box.width-6,y=box.y+box.height/2;
+                stroke({x-3,y-5},{x+2,y},{x-3,y+5},a.enabled?border_color:muted);
+            } else draw_text(label,{box.x+5,box.y+2,std::max(0.0,box.width-10),std::max(0.0,box.height-4)},state.font,TextWrap::none,color);
+            break;
         }
         case Kind::text: {
-            fill(box,background);outline(box,border_color);
+            fill(box,a.enabled?panel:disabled_color);outline(box,border_color);
             const auto offset=scroll_offset(widget.spec.key);auto content=text_bounds(widget);content.x-=offset.x;content.y-=offset.y;content.width+=offset.x;content.height+=offset.y;
             clip_=intersect(clip_,{box.x+3,box.y+2,std::max(0.0,box.width-6),std::max(0.0,box.height-4)});
             const auto selection=text_selection(widget.spec.key);
@@ -326,7 +354,7 @@ private:
             break;
         }
         case Kind::list: {
-            fill(box,background);outline(box,border_color);const auto offset=scroll_offset(widget.spec.key);
+            fill(box,panel);outline(box,border_color);const auto offset=scroll_offset(widget.spec.key);
             if(state.records.empty())draw_text(state.placeholder,{box.x+4,box.y+4,std::max(0.0,box.width-8),std::max(0.0,box.height-8)},state.font,TextWrap::none,muted);
             for(std::size_t i=0;i<state.records.size();++i) {
                 const auto& row=state.records[i];const double y=box.y+double(i)*widget.spec.row_height-offset.y;
@@ -351,35 +379,46 @@ private:
             break;
         }
         }
-        clip_=a.clip;if(focused()==widget.spec.key)outline(box,accent,2);
+        clip_=a.clip;
+        if(focused()==widget.spec.key) {
+            if(widget.spec.kind==Kind::toggle)outline({box.x,box.y+3,std::min(20.0,box.width),std::min(20.0,std::max(0.0,box.height-3))},accent);
+            else outline(box,accent);
+        }
         clip_=saved;
     }
     void paint_pages() {
         for(const auto& [page,area]:page_bounds()) {
-            fill(area,snapshot().active_page==page.id?control_color:background);
-            outline(area,snapshot().active_page==page.id?accent:border_color);
-            centered_text(page.label,{area.x+6,area.y+std::max(0.0,(area.height-line_height({12}))/2),std::max(0.0,area.width-12),area.height},{12},page.enabled?ink:muted);
+            fill(area,snapshot().active_page==page.id?selection_color:control_color);
+            outline(area,border_color);
+            centered_text(page.label,{area.x+6,area.y+std::max(0.0,(area.height-line_height())/2),std::max(0.0,area.width-12),area.height},{},page.enabled?ink:muted);
         }
     }
     void paint_popup() {
         if(!popup())return;
-        const auto box=popup_bounds();fill(box,control_color);outline(box,accent);
+        const auto box=popup_bounds();fill(box,control_color);outline(box,border_color);
         for(std::size_t i=0;i<popup()->options.size();++i) {
             const Rect row{box.x,box.y+double(i)*popup_row_height(),box.width,popup_row_height()};
             if(i==popup()->index)fill(row,selection_color);
-            draw_text(popup()->options[i].label,{row.x+6,row.y+4,std::max(0.0,row.width-12),std::max(0.0,row.height-4)}, {12},TextWrap::none,popup()->options[i].enabled?ink:muted);
+            outline(row,border_color);
+            draw_text(popup()->options[i].label,{row.x+5,row.y+1,std::max(0.0,row.width-10),std::max(0.0,row.height-2)}, {},TextWrap::none,popup()->options[i].enabled?ink:muted);
         }
     }
     void paint_prompt() {
         if(!prompt())return;
-        const auto box=prompt_bounds();fill(box,panel);outline(box,accent,2);
-        draw_text(prompt()->title,{box.x+12,box.y+12,std::max(0.0,box.width-24),24},{14,true});
-        const auto field=prompt_field_bounds();fill(field,background);outline(field,accent);
-        draw_text(prompt()->value,{field.x+4,field.y+6,std::max(0.0,field.width-8),20},{14});
-        const double caret=field.x+4+measure_text({prompt()->value.substr(0,prompt_selection().caret),{14},coordinate_limit,scale_,TextWrap::none}).width;
-        if(caret<field.x+field.width-2)fill({caret,field.y+5,1,17},accent);
-        draw_text("Cancel",{box.x+16,box.y+box.height-30,90,24},{14});
-        draw_text("OK",{box.x+box.width-90,box.y+box.height-30,78,24},{14});
+        const auto box=prompt_bounds();fill(box,background);outline(box,border_color);
+        draw_text(prompt()->title,{box.x+12,box.y+10,std::max(0.0,box.width-24),28},{14,true},TextWrap::word);
+        const auto field=prompt_field_bounds();fill(field,panel);outline(field,accent);
+        const auto saved=clip_;clip_=intersect(clip_,{field.x+4,field.y+4,std::max(0.0,field.width-8),std::max(0.0,field.height-8)});
+        const auto selection=prompt_selection();
+        const auto advance=[&](std::size_t at) {return measure_text({prompt()->value.substr(0,at),{},coordinate_limit,scale_,TextWrap::none}).width;};
+        const auto anchor=advance(selection.anchor),caret=advance(selection.caret);
+        fill({field.x+4+std::min(anchor,caret),field.y+4,std::abs(caret-anchor),line_height()},selection_color);
+        draw_text(prompt()->value,{field.x+4,field.y+4,std::max(0.0,field.width-8),std::max(0.0,field.height-8)},{});
+        fill({field.x+4+caret,field.y+4,1/scale_,line_height()},ink);clip_=saved;
+        for(const auto& [area,label]:{std::pair{prompt_cancel_bounds(),"Cancel"},std::pair{prompt_accept_bounds(),"OK"}}) {
+            fill(area,panel);outline(area,border_color);
+            centered_text(label,{area.x+4,area.y+std::max(0.0,(area.height-line_height())/2),std::max(0.0,area.width-8),area.height},{},ink);
+        }
     }
 };
 }

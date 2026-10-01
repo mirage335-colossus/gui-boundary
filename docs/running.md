@@ -139,10 +139,19 @@ syntax. CTest sets the same environment automatically for `framebuffer_sdl`.
 its own does not capture an ordinary interactive session. Do not leave the dummy
 driver set when you want a visible window.
 
-The default software font is a small ASCII demonstration font. Unsupported
-Unicode glyphs display a fallback while the application retains their UTF-8
-values. A paired measurement/raster provider can replace it through the generic
-framebuffer interface; see the [adapter guide](adapter-guide.md).
+The framebuffer and SDL host use antialiased DejaVu Sans Mono regular and bold,
+generated from the same bundled font sources as Rev. Glyph pixels and metrics
+are compiled into the renderer, so ordinary builds and execution need no font
+library, system font installation or download. Painting, text measurement,
+wrapping and editor positioning use the same metrics. The controls use the
+shared surface, border and selection colors; native toolkit details can still
+differ.
+
+The bundled glyphs cover printable ASCII and Latin-1. Other characters display
+a replacement glyph while their UTF-8 values remain intact. A paired
+measurement/raster provider can supply broader coverage or shaping through the
+generic framebuffer interface. See the [font implementation](framebuffer-font.md)
+and [adapter guide](adapter-guide.md#framebuffer-embedding).
 
 ## Native widgets (FLTK)
 
@@ -275,7 +284,7 @@ operations cannot be replayed into a new one.
 | `Unknown session token` after leaving a hosted tab idle or restarting the server | The session is gone. Reload to start a fresh application; previous in-memory state is lost. |
 | `Session limit reached` | Close unneeded tabs. If release notifications were lost, restart the host to clear its sessions; all hosted tabs will then need reloading. |
 | A page has no controls | **Other page** is intentionally empty. Return to **Controls**. |
-| Unicode looks escaped or has fallback glyphs | This is a documented terminal/software-font profile limit. UTF-8 values remain intact. Native/DOM glyph coverage depends on host fonts. |
+| Unicode looks escaped or has fallback glyphs | The terminal escapes non-ASCII values. The bundled framebuffer font covers printable ASCII and Latin-1, with a replacement glyph elsewhere. UTF-8 values remain intact. Native/DOM glyph coverage depends on their fonts. |
 
 For compilation and missing-test problems, see [Building](building.md#build-troubleshooting).
 For unsupported services and platform qualification, see

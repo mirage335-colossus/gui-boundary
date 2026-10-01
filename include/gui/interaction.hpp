@@ -36,8 +36,11 @@ public:
         bool operator==(const VisualLine&) const = default;
     };
     using ServiceCompletion=std::function<void(ServiceResult)>;
-    explicit InteractiveAdapter(EventSink sink={},TextMeasure measure={})
-        :RetainedAdapter(std::move(sink),std::move(measure)) {}
+    explicit InteractiveAdapter(EventSink sink={},TextMeasure measure={},double editor_inset=6)
+        :RetainedAdapter(std::move(sink),std::move(measure)),editor_inset_(editor_inset) {
+        if(!std::isfinite(editor_inset)||editor_inset<0||editor_inset>coordinate_limit)
+            throw std::invalid_argument("Invalid editor inset");
+    }
     void present(Snapshot view) override {
         policy().require_interaction();
         std::map<std::string,EditorView,std::less<>> editors;
@@ -283,11 +286,12 @@ public:
     double line_height(const Font& font={}) const {
         return std::max(1.0,measure_text({"M",font,coordinate_limit,snapshot().display_scale,TextWrap::none}).height);
     }
-    // Shared software-control insets; renderers project these same logical boxes.
+    // Rendering and input share these boxes. A renderer may reserve horizontal
+    // space for its chrome (for example, a terminal's focus-marker cell).
     Rect text_bounds(const Widget& widget) const {
         auto box=resolved_availability(widget.spec.key).bounds;
         const double y=widget.spec.text_policy.multiline?4:std::max(2.0,(box.height-line_height(widget.state.font))/2);
-        return {box.x+6,box.y+y,std::max(0.0,box.width-12),std::max(0.0,box.height-y-2)};
+        return {box.x+editor_inset_,box.y+y,std::max(0.0,box.width-2*editor_inset_),std::max(0.0,box.height-y-2)};
     }
     // One mapping serves drawing, hit testing and navigation. Word wrapping
     // consumes one separating ASCII space/tab; hard newlines are also excluded
@@ -375,6 +379,7 @@ public:
         return gui::prompt_accept_bounds(snapshot().client_size);
     }
 private:
+    double editor_inset_;
     struct EditorView {
         WidgetKey key;Point offset;bool reveal=true;TextSelection selection;
         std::optional<std::size_t> visual_line;std::size_t visual_caret=0;

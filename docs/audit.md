@@ -39,6 +39,9 @@ when delivery can lag presentation.
 - **Framebuffer:** the renderer produces a complete immutable RGB frame. Hosts
   consume that image and forward input; the SDL host demonstrates a window and
   texture embedding. Frame ownership and skipped-revision damage are explicit.
+  Antialiased regular and bold glyphs use the same preserved DejaVu Sans Mono
+  sources as Rev. Compiled pixels and metrics keep painting and editor geometry
+  consistent without runtime font dependencies.
 - **Hosted browser:** each tab has a C++ application process, an epoch, ordered
   operations and acknowledgments. Only owned values and pixels cross JSON.
   Input, decoder and presentation bounds are explicit.
@@ -79,10 +82,12 @@ this package.
 
 ## Remaining limits
 
-The software font is deliberately small; a full shaping/accessibility/IME system
-would be a separate renderer capability. Terminal cells cannot reproduce every
-pixel pattern or font metric. Browser measurement is eventually reconciled with
-DOM metrics rather than exact on its first frame. The local hosted transport is
+The [bundled software font](framebuffer-font.md) covers printable ASCII and
+Latin-1 with a replacement glyph for other characters. Broader coverage or
+shaping can use the existing paired measurement/painter provider; an OS
+accessibility/IME system would be a separate renderer capability. Terminal cells
+cannot reproduce every pixel pattern or font metric. Browser measurement is
+eventually reconciled with DOM metrics rather than exact on its first frame. The local hosted transport is
 not a deployment/authentication framework. Browser prompts work; filesystem path
 selection and unsupported host services return explicit errors.
 
