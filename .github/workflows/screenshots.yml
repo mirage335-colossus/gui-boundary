@@ -1,0 +1,71 @@
+name: Backend screenshots
+
+on:
+  push:
+    # Preview branches exercise the complete job before merging the workflow.
+    branches: ['screenshots/**']
+    tags: ['screenshots-*']
+  workflow_dispatch:
+
+# Publishing the tag's release requires write access. No pull request trigger.
+permissions:
+  contents: write
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-24.04
+    container: debian:trixie-slim
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LANG: C.UTF-8
+      TZ: UTC
+    steps:
+      # Install Git before checkout so its normal Git path is available.
+      - name: Install distribution packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git gh build-essential cmake ninja-build \
+            clang-19 clang-tools-19 emscripten \
+            libfltk1.3-dev libsdl2-dev libgl-dev libglx-dev \
+            libx11-dev libxrandr-dev libxext-dev libgl1-mesa-dri libglx-mesa0 \
+            xvfb xauth xterm xdotool x11-utils imagemagick \
+            fonts-dejavu-core fonts-liberation \
+            chromium chromium-driver python3 python3-selenium
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and capture all backends
+        run: |
+          python3 tests/screenshots_test.py
+          xvfb-run -a -s '-screen 0 1280x900x24 -dpi 96' \
+            env LIBGL_ALWAYS_SOFTWARE=1 \
+            python3 tools/screenshots.py --output dist/screenshots
+
+      - name: Save screenshots for this run
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-screenshots
+          path: |
+            dist/screenshots/*.png
+            dist/screenshots/BUILD.txt
+          if-no-files-found: error
+
+      - name: Publish screenshot release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/screenshots-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/screenshots/*.png dist/screenshots/BUILD.txt \
+            --verify-tag --latest=false \
+            --title "Backend screenshots: $GITHUB_REF_NAME" \
+            --notes 'Initial application view for each example backend.'
