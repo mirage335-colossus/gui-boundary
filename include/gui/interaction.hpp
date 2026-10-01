@@ -350,15 +350,12 @@ public:
     }
     double popup_row_height() const {
         const auto natural=std::max(24.0,line_height()+8);
-        return popup_?std::min(natural,std::max(1.0,snapshot().client_size.height/double(popup_->options.size()))):natural;
+        return gui::popup_row_height(snapshot().client_size,popup_?popup_->options.size():0,natural);
     }
     Rect popup_bounds() const {
         if(!popup_)return {};
         const auto area=resolved_availability(popup_->key);
-        const double width=std::min(snapshot().client_size.width,std::max(180.0,area.bounds.width));
-        const double height=double(popup_->options.size())*popup_row_height();
-        return {std::clamp(area.bounds.x,0.0,std::max(0.0,snapshot().client_size.width-width)),
-            std::clamp(area.bounds.y+area.bounds.height,0.0,std::max(0.0,snapshot().client_size.height-height)),width,height};
+        return gui::popup_bounds(snapshot().client_size,area.bounds,popup_->options.size(),popup_row_height());
     }
     std::vector<std::pair<Page,Rect>> page_bounds() const {
         std::vector<std::pair<Page,Rect>> result;
@@ -366,17 +363,16 @@ public:
         return result;
     }
     Rect prompt_bounds() const {
-        const double width=std::min(440.0,snapshot().client_size.width),height=std::min(144.0,snapshot().client_size.height);
-        return {(snapshot().client_size.width-width)/2,(snapshot().client_size.height-height)/2,width,height};
+        return gui::prompt_bounds(snapshot().client_size);
     }
     Rect prompt_field_bounds() const {
-        const auto box=prompt_bounds();return intersect(box,{box.x+12,box.y+46,std::max(0.0,box.width-24),28});
+        return gui::prompt_field_bounds(snapshot().client_size);
     }
     Rect prompt_cancel_bounds() const {
-        const auto box=prompt_bounds();return intersect(box,{box.x+12,box.y+box.height-36,90,24});
+        return gui::prompt_cancel_bounds(snapshot().client_size);
     }
     Rect prompt_accept_bounds() const {
-        const auto box=prompt_bounds();return intersect(box,{box.x+box.width-102,box.y+box.height-36,90,24});
+        return gui::prompt_accept_bounds(snapshot().client_size);
     }
 private:
     struct EditorView {

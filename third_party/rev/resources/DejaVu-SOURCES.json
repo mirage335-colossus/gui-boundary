@@ -1,0 +1,21 @@
+{
+  "family": "DejaVu Sans Mono",
+  "upstream_version": "2.37",
+  "distribution_package": "fonts-dejavu-core",
+  "distribution_version": "2.37-8",
+  "provenance_url": "https://dejavu-fonts.github.io/",
+  "license": "DejaVu-LICENSE",
+  "authors": "DejaVu-AUTHORS",
+  "fonts": [
+    {
+      "file": "DejaVuSans.ttf",
+      "upstream_filename": "DejaVuSansMono.ttf",
+      "sha256": "54bf827eb99404e8f430c330ad30f063334f637eba0109b6a18d4f566a8e9dd8"
+    },
+    {
+      "file": "DejaVuSansMono-Bold.ttf",
+      "upstream_filename": "DejaVuSansMono-Bold.ttf",
+      "sha256": "0d3c03d1b667192f91223660a3163325cf83132662fe4d9f7d6e596bf7a995c2"
+    }
+  ]
+}

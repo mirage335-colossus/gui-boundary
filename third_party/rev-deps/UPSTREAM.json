@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "dependencies": [
+    {
+      "name": "glew",
+      "version": "2.3.1",
+      "archive": "glew-2.3.1.tgz",
+      "sha256": "b64790f94b926acd7e8f84c5d6000a86cb43967bd1e688b03089079799c9e889",
+      "upstream_url": "https://downloads.sourceforge.net/glew/glew-2.3.1.tgz"
+    },
+    {
+      "name": "freetype",
+      "version": "2.14.3",
+      "archive": "freetype-2.14.3.tar.xz",
+      "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "upstream_url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz"
+    }
+  ]
+}

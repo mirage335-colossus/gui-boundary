@@ -19,13 +19,18 @@ def strip_comments(source):
 def violations(source, public_header=False):
     source = strip_comments(source)
     findings = []
-    dependencies = re.compile(r'(?:#\s*include\s*[<"]|(?:from|import)\s*["\'])([^>"\']+)')
+    dependencies = re.compile(r'(?:#\s*include\s*[<"]|(?:from|import)\s*[<"\'])([^>"\']+)')
     for match in dependencies.finditer(source):
         path = match.group(1).replace("\\", "/")
         if "examples/" in path or Path(path).name in ("application.hpp", "session.hpp"):
             findings.append("Generic renderer depends on application composition: " + path)
         if public_header and ("backends/" in path or path.startswith(("FL/", "SDL", "windows.h"))):
             findings.append("Public contract depends on a host implementation: " + path)
+    # C++ named-module imports have no quoted/header path. Keep the optional
+    # toolkit's modules below the same boundary as native include directives.
+    if public_header:
+        for match in re.finditer(r'(?:^|;)\s*(?:export\s+)?import\s+(Rev(?:\.[A-Za-z_]\w*)*(?::[A-Za-z_]\w*)?)\s*;', source, re.M):
+            findings.append("Public contract imports a host implementation: " + match.group(1))
     if re.search(r'\bExample\b', source):
         findings.append("Generic renderer names the example application type")
     identity = r'(?:\b\w+\s*(?:\.|->)\s*)*\b(?:id|binding)\b'
@@ -62,6 +67,11 @@ def negative_fixtures():
     for source in rejected:
         assert violations(source), "Architecture guard missed its negative fixture: " + source
     assert violations('#include <FL/Fl.H>', public_header=True), "Public native dependency was accepted"
+    assert violations('import <FL/Fl.H>;', public_header=True), "Public native header unit was accepted"
+    for source in ('import Rev;', 'import Rev.Widget;', 'export import Rev.Window;', 'import Rev.Widget:implementation;', 'module; import Rev.Widget;'):
+        assert violations(source, public_header=True), "Public native module dependency was accepted: " + source
+        assert not violations(source), "Private native module import was rejected: " + source
+    assert not violations('// import Rev.Widget;\n#include "gui/contract.hpp"', public_header=True), "Comment was treated as a native module dependency"
     accepted = [
         'if (widget.spec.key.id == input.target.id) dispatch();',
         'if (type == "activate") send(Activate{});',

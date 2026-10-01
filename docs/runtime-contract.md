@@ -196,6 +196,7 @@ The queue's at-most-once reply acceptance does not prove that an external effect
 |---|---|---|
 | Memory/reference | Shared `ServiceQueue` and supplied test completions | No implicit platform service implementation |
 | FLTK | Nonblocking prompt controls and host clipboard text writing | File selection and location opening return errors in this example |
+| Rev | Asynchronous toolkit prompt controls and native clipboard text writing; editor shortcuts read/write the platform clipboard | File selection and location opening return errors; native clipboard text is bounded to 16 MiB |
 | Terminal and framebuffer/SDL | `InteractiveAdapter::service` owns prompt state, input modality and matching callback; selected renderer draws it | Other service kinds require a host implementation and return errors |
 | Hosted browser and Wasm | Asynchronous DOM `<dialog>` prompt using the shared request/result protocol | File selection, clipboard writing and location opening return explicit unsupported-service errors |
 
@@ -219,6 +220,16 @@ their appearance follows each rendering profile. This reuses service identity,
 editing and modality mechanics without adding application feature meaning to a
 renderer. Native widget prompts use toolkit controls with the same shared
 request/completion ownership.
+
+Rev creates native prompt controls after the current callback stack unwinds.
+Input is already blocked while those controls are pending, so a batch of native
+events cannot reach background editors or uninitialized prompt controls.
+Unrelated publications preserve focus within the prompt, and closure supplies
+one cancelled completion. Native clipboard reads distinguish an empty string
+from a failed read. A delayed editor paste must still match the captured widget
+generation, focus, base text and selection; a prompt paste also checks the exact
+request identity. Cut removes text only after clipboard writing succeeds, and
+read-only editors reject cut/paste edits to their value.
 
 ## Hosted transport lifetime and progress
 

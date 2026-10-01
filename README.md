@@ -1,7 +1,7 @@
 # Generic GUI boundary
 
 A standalone C++20 example of keeping application features and layout behind a
-GUI abstraction. One application runs through native widgets, a terminal UI, a
+GUI abstraction. One application runs through FLTK and Rev widgets, a terminal UI, a
 browser backed by a native process, browser-only WebAssembly, and a software
 framebuffer with an optional window host. Everything needed to study the example
 is in this repository; public headers depend only on the C++ standard library
@@ -36,12 +36,13 @@ No dependencies are downloaded by the build.
 
 These commands use a single-configuration generator, such as Makefiles or Ninja.
 They build `gui_example`, `gui_terminal`, `gui_web_demo`, and `gui_framebuffer`,
-plus their tests. **They do not build FLTK, SDL, or Wasm.** Those build commands
-are in the next section. Rev is not implemented in this standalone example.
+plus their tests. **They do not build FLTK, SDL, Rev, or Wasm.** Those build commands
+are in the next section. Rev's optional compiler and graphics requirements do
+not apply to this core build.
 
 ```sh
 cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
-  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_BUILD_REV=OFF -DGUI_TEST_HOSTS=OFF
 cmake --build build-core --parallel 2
 ctest --test-dir build-core --output-on-failure
 ./build-core/gui_example
@@ -75,7 +76,7 @@ constraints. Visual Studio and other multi-configuration generators need the
 
 Run the selected block from the repository root. Each block includes its own
 configure and build commands before launching the matching binary or server;
-the FLTK, SDL, and Wasm blocks do not require the core build first. Each launch
+the FLTK, SDL, Rev, and Wasm blocks do not require the core build first. Each launch
 starts separate in-memory application state. Interactive programs and servers
 keep running until closed.
 
@@ -86,7 +87,7 @@ Requires FLTK development headers/libraries and a desktop display. This enables
 
 ```sh
 cmake -S . -B build-fltk -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
-  -DGUI_BUILD_FLTK=ON -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+  -DGUI_BUILD_FLTK=ON -DGUI_BUILD_SDL=OFF -DGUI_BUILD_REV=OFF -DGUI_TEST_HOSTS=OFF
 cmake --build build-fltk --parallel 2
 ./build-fltk/gui_fltk_demo
 ```
@@ -102,7 +103,7 @@ display. This enables `GUI_BUILD_SDL` and produces
 
 ```sh
 cmake -S . -B build-sdl -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
-  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=ON -DGUI_TEST_HOSTS=OFF
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=ON -DGUI_BUILD_REV=OFF -DGUI_TEST_HOSTS=OFF
 cmake --build build-sdl --parallel 2
 ./build-sdl/gui_framebuffer_sdl
 ```
@@ -120,7 +121,7 @@ last command. Otherwise, this block builds it:
 
 ```sh
 cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
-  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_BUILD_REV=OFF -DGUI_TEST_HOSTS=OFF
 cmake --build build-core --parallel 2
 python3 backends/web/host.py --executable build-core/gui_web_demo --port 8765
 ```
@@ -160,12 +161,31 @@ No FLTK or SDL development files are required. Choose the program to run:
 | Terminal UI | `build-core/gui_terminal` | `./build-core/gui_terminal` (Ctrl+Q exits) |
 | Framebuffer image | `build-core/gui_framebuffer` | `./build-core/gui_framebuffer --output build-core/example.ppm` (writes a file and exits) |
 
-### Rev
+### Rev native widgets
 
-This example currently has **no Rev adapter, CMake option, or executable**.
-There is no Rev build/run command to use here; supporting it requires adding a
-generic adapter and host. The supported build targets are listed in the
-[build-output reference](docs/building.md#which-build-produces-which-output).
+Requires CMake 3.28+, Ninja, a C++23 module-capable compiler, OpenGL, and the
+platform development packages listed in the [offline reconstruction guide](docs/rev-offline.md).
+On Linux with Clang 19 and those packages installed, this block enables
+`GUI_BUILD_REV` and produces **`build-rev/gui_rev_demo`**. Bundled GLEW and FreeType
+sources are built locally; the ordinary build downloads nothing:
+
+```sh
+cmake -P tools/verify-rev.cmake
+cmake -S . -B build-rev -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
+  -DGUI_BUILD_REV=ON -DGUI_REV_BUNDLED_DEPS=ON -DBUILD_TESTING=ON \
+  -DGUI_BUILD_FLTK=OFF -DGUI_BUILD_SDL=OFF -DGUI_TEST_HOSTS=OFF
+cmake --build build-rev --parallel 2
+./build-rev/gui_rev_demo
+```
+
+Close the window to exit. Rev renders toolkit widgets and OpenGL textures from
+the same shared application declarations. The public boundary remains C++20;
+Rev's C++23 module imports stay in its private implementation. Its toolkit
+sources, assets and dependency archives are included locally, with checksums.
+The [Rev build details](docs/building.md#native-widgets-rev) explain display
+tests, and the [offline guide](docs/rev-offline.md) provides Debian package and
+Windows Microsoft-toolchain recipes with their qualification limits.
 
 ## Where application changes belong
 
@@ -211,7 +231,7 @@ The contract references cover [widgets](docs/specification.md),
 [layout and presentation](docs/layout-contract.md),
 [bitmaps](docs/bitmap-contract.md), and [runtime/services](docs/runtime-contract.md).
 The default tests exercise the boundary without a GUI toolkit. Host tests add
-real PTY, socket/process, SDL, and FLTK paths when their prerequisites are enabled.
+real PTY, socket/process, SDL, FLTK, and Rev paths when their prerequisites are enabled.
 Public-header and application isolation checks run during compilation.
 
 The profiles have explicit limits: terminal output escapes non-ASCII characters

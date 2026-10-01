@@ -250,16 +250,19 @@ Only clear that flag after the native resource contains the committed image.
 CPU staging temporarily duplicates the image; `blit` also copies each input block.
 `MemoryAdapter` limits aggregate retained bitmap bytes, with a default of 64 MiB.
 That budget does not include staging, snapshots, native textures, or complete-state copies.
-Choose an appropriate peak-memory limit and upload strategy for a future native adapter.
+Choose an appropriate peak-memory limit and upload strategy for each native adapter.
 
 [bitmap_test.cpp](../tests/bitmap_test.cpp) verifies row lengths, padding, storage and
 arithmetic rejection, all format conversions, packed thresholds, borrowed ownership,
 overlapping copies, retained snapshots, disjoint repaint equivalence, empty grids,
 identity changes, coalesced damage, resizing, sparse replacement, exception rollback,
 retry, output-format enforcement, damage enforcement, and mutation during repaint.
-These are executable CPU checks. This package does not implement or certify a native backend.
-Future native conformance must additionally verify actual rendered pixels, fractional display
-scales, origin snapping, clipping, empty allocations, upload lifetime, and resource cleanup.
+These are executable CPU checks. Native display tests supply separate evidence;
+the Rev test reads actual GL pixels to check texture revisions and clipping.
+Native conformance additionally covers fractional display scales, origin
+snapping, empty allocations, upload lifetime, and resource cleanup. See the
+[coverage inventory and qualification record](conformance.md); CPU results alone
+do not qualify a toolkit or graphics driver.
 
 ## Cell sampling and complete application frames
 

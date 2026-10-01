@@ -161,6 +161,37 @@ continues while a service is pending. The example implements prompt and clipboar
 write services in this profile. File/location services report an explicit error;
 their presence in the public vocabulary is not an implementation in every host.
 
+## Native widgets (Rev)
+
+After the [Rev build](building.md#native-widgets-rev), run:
+
+```sh
+./build-rev/gui_rev_demo
+```
+
+Use a desktop with a suitable OpenGL implementation. Rev renders toolkit
+controls, text, row cells and bitmap textures using the shared application
+geometry. The source snapshot includes its fonts and artwork; those resources
+are embedded during compilation, so the program does not fetch them or depend
+on an upstream checkout at run time. Close its window to exit.
+
+Use normal pointer selection and editor keys, Ctrl+C/X/V to copy/cut/paste,
+Tab/Shift+Tab to move focus, and the page buttons to change pages. Clipboard text
+is UTF-8 at the boundary; delayed native paste is rejected if its editor, focus,
+base text, or selection has changed. The [common walkthrough](#try-the-same-features-in-each-interface)
+applies to Rev, including choice/menu options, editor submission, shared modals
+and prompts. Rev's font and widget border rasterization can differ from FLTK or
+the browser while the shared arrangement stays the same.
+
+Rev prompts are asynchronous native controls. The pending prompt blocks
+application input, completes with a value or cancellation, and restores focus.
+Prompt and clipboard-write services are implemented; file/location services
+return explicit errors. The optional display test exercises
+native callbacks and reads actual OpenGL pixels; passing it does not qualify
+every GPU, graphics driver, input method, or screen reader. The
+[offline guide](rev-offline.md) records the supported build inputs and platform
+qualification limits.
+
 ## Browser interfaces
 
 Both browser modes render the same shared C++ application using the same DOM
@@ -236,6 +267,7 @@ operations cannot be replayed into a new one.
 | A terminal shortcut is intercepted | Check the emulator's bindings and use the documented aliases. The host must receive the keystroke to decode it. |
 | SDL creates no visible window | Unset `SDL_VIDEODRIVER=dummy` for ordinary use and check that a display/video driver is available. |
 | FLTK cannot open a display | Run in a graphical session; use Xvfb for automated Linux checks. |
+| Rev cannot open a window or create an OpenGL context | Check the X display on Linux or the Windows graphics driver. Rev requires OpenGL 4.4, or 4.3 with buffer-storage support; the default Windows software OpenGL implementation is insufficient. For Linux CI, use Xvfb with a suitable Mesa software driver. |
 | Browser host reports address already in use | Choose another `--port` and open its printed URL. |
 | `Unexpected Host` or `Unexpected Origin` | Use the exact `http://127.0.0.1:PORT/` origin printed by the host. |
 | `Only Wasm hosting is configured` | Open `/?mode=wasm`, or restart the host with `--executable` to enable hosted C++. |

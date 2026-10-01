@@ -30,6 +30,14 @@ Composition roots instantiate the selected adapter, connect its event sink to
 remain below the shared application. The browser composition roots use exactly
 the same application in a native process or an Emscripten module.
 
+The optional Rev implementation keeps C++23 toolkit modules behind a private
+implementation in `backends/rev/`. Its ordinary adapter header exposes only the
+public boundary and standard-library types. Shared application code does not
+import Rev modules, include its headers, or choose platform libraries. FLTK and
+Rev therefore exercise two different native-control implementations without
+changing application declarations. The architecture guard checks both native
+includes and Rev named-module imports at the public boundary.
+
 ## Applying a presentation
 
 1. Shared code determines text, options, stable rows, values, availability,

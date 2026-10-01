@@ -43,11 +43,14 @@ registration follows these conditions:
 | Python 3 and `GUI_TEST_HOSTS=ON` | Adds `web_host`; also adds `terminal_pty` on Unix |
 | `GUI_BUILD_SDL=ON` | Adds `framebuffer_sdl`, including when `GUI_TEST_HOSTS=OFF` |
 | `GUI_BUILD_FLTK=ON` | Builds `fltk_test`; registers `fltk` only with `GUI_TEST_HOSTS=ON` |
+| `GUI_BUILD_REV=ON` | Builds `rev_test` and `rev_clipboard_test`; registers `rev` and `rev_clipboard` only with `GUI_TEST_HOSTS=ON` |
 | Emscripten build and Node executable found | Registers only `wasm`; native targets and checks are not part of this profile |
 
 Thus a native build has 14 baseline checks, or 16 with both Python and Node. A
-Unix build with both interpreters, both optional toolkits and host tests enabled
-has 20. Counts are a quick sanity check; the names from `ctest -N` are the actual
+Unix build with both interpreters, FLTK, SDL and host tests enabled
+has 20. Enabling Rev adds its display and clipboard checks, giving 22; it does
+not replace another check.
+Counts are a quick sanity check; the names from `ctest -N` are the actual
 inventory. A successful run of 14 checks does not establish that the Python or
 JavaScript checks passed. Missing optional interpreters omit their checks rather
 than producing a CTest failure or a visible skipped result. Reconfigure after
@@ -83,6 +86,32 @@ subprocesses; it requires a host environment that permits both operations. The
 it does not require an interactive terminal attached to CTest. A sandbox that
 blocks sockets or PTYs cannot provide those integration results. FLTK display
 failures likewise require a usable display, not a change to the shared model.
+
+Rev uses the separate [Rev build profile](building.md#native-widgets-rev). With
+`GUI_BUILD_REV=ON`, `BUILD_TESTING=ON`, and `GUI_TEST_HOSTS=ON`, run its display
+check against real toolkit controls and an actual OpenGL context:
+
+```sh
+ctest --test-dir build-rev --output-on-failure -R '^rev(_clipboard)?$'
+# Linux without a desktop, with Xvfb and a suitable Mesa driver installed:
+xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 ctest --test-dir build-rev --output-on-failure -R '^rev(_clipboard)?$'
+```
+
+For a visual artifact, `./build-rev/rev_test build-rev/rev.ppm` also saves the
+initial application window from GL readback. The generic test fixture uses
+unrelated identifiers and covers callbacks, native state, clipping and texture
+updates, pages, modal input, services and retirement. Test probes call native
+callback paths; they are not OS-level keyboard automation or proof of a specific
+physical input device. Compare the saved view and exercise real desktop input
+before qualifying a release. Windows compilation/execution and a cold Bookworm
+build require their own recorded runs; a newer Linux host is not a substitute.
+
+`rev_clipboard` tests the real platform clipboard separately: Unicode and empty
+text, a 3 MiB transfer, cancellation, ownership changes, bounds, malformed input
+and missing text formats. Linux also exercises incremental X11 transfer and a
+malformed external selection owner. These tests replace clipboard contents, so
+use the private Xvfb display above or a disposable Windows desktop for isolated
+qualification.
 
 ### Check the compiled browser module
 
@@ -141,6 +170,8 @@ platform integration changes, also perform the relevant manual scenarios below.
 | `terminal_test.cpp`, `terminal_pty_test.py` | Cell projection and parser behavior; actual terminal host via a pseudo-terminal |
 | `framebuffer_test.cpp` | Software pixels, immutable frames, damage and interaction |
 | `fltk_test.cpp` | Real native adapter callbacks and shared application integration; requires the native toolkit/display |
+| `rev_test.cpp` | Native Rev callback translation, independent declarations, retained editor state, stale lifetimes, option/row identity, modal/page input scope, clipboard exchange and stale completion rejection, prompt lifecycle, shared application integration, and actual GL texture/clipping readback |
+| `rev_clipboard_test.cpp` | Actual native clipboard transfer, empty/error distinction, Unicode/bounds, large transfers, cancellation and ownership races; malformed external X11 data on Linux |
 | `web_test.cpp` | Bounded JSON, epochs/sequences/acknowledgments, stale edits and generations, owned pixels, measurements and service replies |
 | `web_renderer_test.mjs` | Transport retry, Unicode offsets, retained DOM mechanics and declared rectangles using a small DOM fixture |
 | `web_host_test.py` | Real loopback HTTP/process path, origin/token guard, per-tab isolation, duplicate handling and child cleanup |
@@ -158,6 +189,7 @@ must be reported as skipped when their actual prerequisites are unavailable.
 | --- | --- | --- |
 | Memory/reference | Retained model and deterministic probes | No visible native UI or implicit host services |
 | Native widgets | FLTK controls and drawing | Toolkit and display required; native shaping, IME and accessibility need platform checks |
+| Rev widgets | Private C++23 toolkit modules, native controls/text and OpenGL textures | Preserved sources plus supported compiler/graphics stack required; platform IME, accessibility and GPU behavior need qualification |
 | Terminal | Shared logical geometry projected into terminal cells | Discrete cells, reduced artwork detail, terminal font and color behavior; no pixel-identical glyph promise |
 | Software framebuffer | Shared interaction and full RGB raster image | Small demonstration font; unsupported glyphs have a visible fallback; no independent screen-reader or IME engine |
 | Framebuffer window host | SDL input and texture upload | Inherits software rendering limits; SDL/display required |
@@ -233,3 +265,34 @@ Python 3.13, Node 20 and Emscripten 3.1.69:
 Windows console execution, macOS behavior, platform screen readers and native
 IME combinations were not qualified by this Linux run. The software font's
 fallback behavior is a documented profile constraint, not Unicode shaping.
+
+## Rev implementation validation
+
+The Rev addition was checked on Debian 13.7 with Clang 19.1.7, CMake 3.31.6,
+Ninja, and a private Xvfb display using Mesa 25.0.7 llvmpipe OpenGL 4.5.
+Both dependency profiles were configured and built in network namespaces without
+external networking: the included GLEW 2.3.1/FreeType 2.14.3 sources and installed
+distribution GLEW 2.2.0/FreeType 2.13.3 libraries. These were Debug builds, with
+host tests enabled.
+
+- The bundled Rev profile passed its 20 checks. The combined profile, including
+  FLTK, SDL, Rev and the native clipboard test, passed all 22 checks.
+- The native Rev test checks actual toolkit rectangles, text state and GL
+  pixels, including clipping, root palette, bold glyphs and bitmap revision
+  upload. Generic input tests cover unrelated widget identities, later feature
+  declarations, generations, keyboard actions, popup reentrancy, modal scope,
+  batched prompt intake and clipboard completion races.
+- The actual demo was launched from `/tmp`, outside the source working
+  directory, and operated through X11 XTest keyboard/mouse input. Typing into the
+  editor, checking the toggle and clicking **Add row** produced the matching
+  visible row. Window captures were visually checked against the shared layout.
+- Source manifests, public-header/application isolation, architecture guards,
+  documentation links, shell-command syntax and whitespace checks passed. The
+  ordinary GCC profile still passed its 16 default checks with Rev disabled.
+
+This run establishes Linux build and host evidence for those inputs. It does
+not qualify a fresh Debian Bookworm installation, Windows, hardware GPU drivers,
+native input methods or accessibility integrations. The
+[offline reconstruction guide](rev-offline.md) supplies the Bookworm package and
+Microsoft-toolchain procedures; those target environments still need their own
+build and desktop qualification runs.

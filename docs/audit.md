@@ -28,6 +28,11 @@ when delivery can lag presentation.
 
 - **Native widgets:** a concrete FLTK adapter demonstrates native controls,
   events, text measurement and host integration.
+- **Rev widgets:** an optional native Rev adapter consumes the same widget
+  declarations, with toolkit controls, native text and OpenGL texture delivery.
+  Toolkit modules and platform dependencies remain behind a private adapter
+  implementation. It does not wrap the software framebuffer or copy feature
+  behavior into toolkit-specific handlers.
 - **Terminal:** a concrete terminal host consumes the same rectangles and
   projects them into cells, with shared software interaction and bounded input
   handling. It does not introduce a second application menu or layout.
