@@ -187,6 +187,23 @@ The [Rev build details](docs/building.md#native-widgets-rev) explain display
 tests, and the [offline guide](docs/rev-offline.md) provides Debian package and
 Windows Microsoft-toolchain recipes with their qualification limits.
 
+## Capture all backends
+
+The [screenshot guide](docs/screenshots.md) lists the Debian 13 packages needed
+to build and capture all seven visual backends. Once installed, run:
+
+```sh
+xvfb-run -a -s '-screen 0 1280x900x24 -dpi 96' \
+  env LIBGL_ALWAYS_SOFTWARE=1 \
+  python3 tools/screenshots.py --output dist/screenshots
+```
+
+This builds FLTK, Rev, SDL, TUI, framebuffer and hosted web together, then builds
+Wasm separately. It writes seven PNGs and build provenance to `dist/screenshots`.
+The same command runs in GitHub Actions: a push to a `screenshots/**` branch or
+a manual run uploads a preview artifact. Only a `screenshots-*` tag publishes
+the images as release assets.
+
 ## Where application changes belong
 
 Start with [`examples/application.hpp`](examples/application.hpp). Its constructor
