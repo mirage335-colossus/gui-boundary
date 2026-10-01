@@ -23,7 +23,13 @@ TARGETS = ("gui_fltk_demo", "gui_rev_demo", "gui_framebuffer_sdl", "gui_terminal
 
 
 def command(args, **kwargs):
-    return subprocess.run([str(arg) for arg in args], check=True, timeout=30, **kwargs)
+    try:
+        return subprocess.run([str(arg) for arg in args], check=True, timeout=30, **kwargs)
+    except subprocess.CalledProcessError as error:
+        if error.stderr:
+            detail = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr
+            print(detail.strip(), file=sys.stderr)
+        raise
 
 
 def text(args):
