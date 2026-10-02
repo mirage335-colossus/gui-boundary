@@ -283,3 +283,9 @@ not provide an OS accessibility or IME engine. Interactive profiles implement
 prompts; other host services vary by profile and report errors when unavailable. See
 [backend profiles](docs/conformance.md#backend-profiles) before treating a passing
 test suite as qualification for a particular platform or assistive technology.
+
+## Licensing
+
+Project-owned code and documentation use [CC0 1.0 Universal](LICENSE).
+Third-party code and fonts retain their existing terms; see the
+[licensing scope and retained notices](docs/licensing.md).
