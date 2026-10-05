@@ -1,13 +1,13 @@
-GUI boundary: project-owned work dedication
+CC0 1.0 Universal
 
-To the extent of their copyright and related rights in the project-owned source,
-examples, tests, build tools and documentation, the gui-boundary copyright
-holders dedicate that work under CC0 1.0 Universal, reproduced below.
+Copyright (c) 2026 mirage335
 
-Third-party work is excluded, including third_party/, bundled font data and
-include/gui/detail/framebuffer_font_data.hpp. Existing notices and grants remain
-in effect. See docs/licensing.md for the scope and supplier notice locations.
-This dedication does not grant rights that the copyright holders do not own.
+To the extent possible under law, mirage335 has waived all copyright and
+related or neighboring rights to this work under CC0 1.0 Universal.
+
+Third-party components retain their respective licenses and notices.
+
+https://creativecommons.org/publicdomain/zero/1.0/
 
 Creative Commons Legal Code
 

@@ -286,6 +286,7 @@ test suite as qualification for a particular platform or assistive technology.
 
 ## Licensing
 
-Project-owned code and documentation use [CC0 1.0 Universal](LICENSE).
+Author: mirage335. Project-owned code and documentation are dedicated to the
+public domain under [CC0 1.0 Universal](LICENSE); attribution is not required.
 Third-party code and fonts retain their existing terms; see the
 [licensing scope and retained notices](docs/licensing.md).

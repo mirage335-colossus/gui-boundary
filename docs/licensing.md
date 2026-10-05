@@ -1,10 +1,11 @@
 # Licensing and retained notices
 
-The copyright holders dedicate their project-owned source, examples, tests,
+Author mirage335 dedicates the project-owned source, examples, tests,
 build tools and documentation to the public domain under
 [CC0 1.0 Universal](../LICENSE), including its fallback license. This applies only
-to rights they own. The full legal text is retained locally; using the project
-does not require retrieving a license from a website.
+to rights mirage335 owns. Attribution is not required for this project-owned
+work. The full legal text is retained locally; using the project does not require
+retrieving a license from a website.
 
 Third-party code, resources and derived font data retain their existing terms.
 The dedication excludes `third_party/` and
